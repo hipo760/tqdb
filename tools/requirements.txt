@@ -1,0 +1,6 @@
+# Requirements for TQDB Tools - Python 3 Refactored Scripts
+# All scripts require the Cassandra driver for database connectivity
+cassandra-driver>=3.25.0
+
+# Optional: For enhanced date/time handling (if needed in future)
+# python-dateutil>=2.8.0
