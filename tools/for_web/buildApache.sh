@@ -36,6 +36,15 @@ fi
 # Create symbolic link to TQDB vhost config
 ln -sf ${TQDB_FORWEB_DIR}/TQDB.vhost.conf ${APACHE_CONF_DIR}/
 
+# Fix SELinux context and permissions for the config file
+sudo restorecon -R ${APACHE_CONF_DIR}/
+sudo setsebool -P httpd_read_user_content 1
+sudo setsebool -P httpd_enable_cgi 1
+
+# Ensure proper permissions on the source file
+sudo chmod 644 ${TQDB_FORWEB_DIR}/TQDB.vhost.conf
+sudo chown root:root ${TQDB_FORWEB_DIR}/TQDB.vhost.conf
+
 # Set permissions
 chmod -R +x /home/tqdb/
 chmod -R +r /home/tqdb/

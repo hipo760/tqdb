@@ -189,26 +189,90 @@ sudo ln -sf /etc/cassandra/ /var/cassandra/conf
 
 #### Install Cassandra C++ Driver
 ```bash
-# Install development tools and dependencies
-sudo dnf groupinstall -y "Development Tools"
-sudo dnf install -y cmake libuv-devel openssl-devel
+# Install basic dependencies
+sudo dnf install -y wget
 
-# Download and compile Cassandra C++ driver from source (Rocky 9 compatible)
+# Download and install DataStax C++ driver packages for Rocky Linux
 cd /tmp
-wget https://github.com/datastax/cpp-driver/archive/2.16.2.tar.gz
-tar -xzf 2.16.2.tar.gz
-cd cpp-driver-2.16.2
 
-# Build and install
-mkdir build
-cd build
-cmake ..
-make -j$(nproc)
-sudo make install
+# Download the main driver package
+wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/cassandra/v2.17.1/cassandra-cpp-driver-2.17.1-1.el9.x86_64.rpm
+
+# Download the development package
+wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/cassandra/v2.17.1/cassandra-cpp-driver-devel-2.17.1-1.el9.x86_64.rpm
+
+# Download dependencies (libuv)
+wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/dependencies/libuv/v1.34.0/libuv-1.34.0-1.el9.x86_64.rpm
+wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/dependencies/libuv/v1.34.0/libuv-devel-1.34.0-1.el9.x86_64.rpm
+
+# Install the packages in correct order (dependencies first)
+sudo rpm -ivh libuv-1.34.0-1.el9.x86_64.rpm
+sudo rpm -ivh libuv-devel-1.34.0-1.el9.x86_64.rpm
+sudo rpm -ivh cassandra-cpp-driver-2.17.1-1.el9.x86_64.rpm
+sudo rpm -ivh cassandra-cpp-driver-devel-2.17.1-1.el9.x86_64.rpm
+
+# Update library cache
 sudo ldconfig
 
-# Test the C++ driver
-/home/tqdb/codes/tqdb/tools/itick  # Run this to verify cpp-driver works
+# Verify installation
+echo "Checking installed packages..."
+rpm -qa | grep -E "(cassandra|libuv)"
+
+echo "Checking library files..."
+ldconfig -p | grep cassandra
+ls -la /usr/lib64/libcassandra*
+
+echo "Checking header files..."
+ls -la /usr/include/cassandra*
+```
+
+
+#### Test the C++ driver installation
+```bash
+echo "Testing C++ driver compilation..."
+cat > /tmp/test_cassandra.cpp << 'EOF'
+#include <cassandra.h>
+#include <iostream>
+
+int main() {
+    std::cout << "Cassandra C++ Driver test - basic functionality check" << std::endl;
+    
+    // Test basic cluster creation
+    CassCluster* cluster = cass_cluster_new();
+    if (cluster) {
+        std::cout << "✓ Successfully created Cassandra cluster object" << std::endl;
+        
+        // Test session creation
+        CassSession* session = cass_session_new();
+        if (session) {
+            std::cout << "✓ Successfully created Cassandra session object" << std::endl;
+            cass_session_free(session);
+        } else {
+            std::cout << "✗ Failed to create session object" << std::endl;
+        }
+        
+        cass_cluster_free(cluster);
+    } else {
+        std::cout << "✗ Failed to create cluster object" << std::endl;
+        return 1;
+    }
+    
+    std::cout << "✓ Cassandra C++ Driver is working correctly" << std::endl;
+    return 0;
+}
+EOF
+
+# Compile and run test
+g++ -o /tmp/test_cassandra /tmp/test_cassandra.cpp -lcassandra
+/tmp/test_cassandra
+
+# Clean up test files and downloads
+rm -f /tmp/test_cassandra /tmp/test_cassandra.cpp
+rm -f /tmp/*.rpm
+
+# Final verification with TQDB tools
+echo "Testing with TQDB tools..."
+/home/tqdb/codes/tqdb/tools/itick  # Run this to verify cpp-driver works with TQDB
 ```
 
 ### 6. Apache HTTP Server (httpd) Configuration
