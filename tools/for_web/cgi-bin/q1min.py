@@ -1,109 +1,391 @@
-#!/usr/bin/python
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+
+"""
+TQ Database Minute-Level Data Query CGI Script
+
+This CGI script provides minute-level historical trading data retrieval for the TQ Database system.
+It generates 1-minute interval OHLCV (Open, High, Low, Close, Volume) bar data for specified symbols
+and date ranges, supporting both regular symbols and custom multi-leg symbols.
+
+Key Features:
+- 1-minute OHLCV bar data generation from tick data or aggregated sources
+- Support for custom multi-leg symbols (prefixed with ^^)
+- Flexible output formats: gzipped text or CSV download
+- Date range validation with automatic first valid date detection
+- Integration with TQ Database shell scripts and Python tools
+
+Output Formats:
+- Default: Gzipped text/plain format for web display
+- CSV: Downloadable CSV file with headers for data analysis
+
+Author: TQ Database Team
+Compatible with: Python 3.x, Rocky Linux 9.0+, TQ Database Tools
+"""
+
 import time
 import sys
-import time
 import datetime
-from socket import socket
 import os
 import subprocess
-import urllib, urllib2, json
+import json
+from urllib.parse import quote, unquote
+from urllib.request import urlopen
 
-szBinDir='/home/tqdb/codes/tqdb/tools/'
-szSymbol = "WTF.506" #"^^NKTOPX" #"SIN"; #"TXO;201506;9200P";
-timeoffset=0	
-iLocalTimeOff=480 #TW
-iGZip=1
-iRemoveQfile=1
-begDT = '2030-5-23 11:45:00'
-endDT = '2030-5-23 21:46:00'
-fileType = 0 #0=gz 1=csv
-mapQS={}
-def getFirstValidDateTime(symbol, begDTstr, endDTstr):
-    trgType = 'MinBar'
-    begRefDT, endRefDT = (-1, -1)
-    url = 'http://127.0.0.1/cgi-bin/qSymRefPrc.py?symbol=%s&qType=LastValidPrc&qDatetime=%s' % (urllib2.quote(symbol), urllib2.quote(begDTstr))
-    resp = urllib2.urlopen(url)
-    obj = json.loads(resp.read())
-    #print obj
-    if obj != None and trgType in obj and obj[trgType][0] != None:
-        begRefDT = obj[trgType][0]['datetime']
-    url = 'http://127.0.0.1/cgi-bin/qSymRefPrc.py?symbol=%s&qType=LastValidPrc&qDatetime=%s' % (urllib2.quote(symbol), urllib2.quote(endDTstr))
-    resp = urllib2.urlopen(url)
-    obj = json.loads(resp.read())
-    #print obj
-    if obj != None and trgType in obj and obj[trgType][0] != None:
-        endRefDT = obj[trgType][0]['datetime']
-    if begRefDT != -1 and begRefDT == endRefDT:
-        begRefDTobj = datetime.datetime.strptime(begRefDT, "%Y-%m-%d %H:%M:%S")
-        begRefDTEopch = (begRefDTobj - datetime.datetime(1970,1,1)).total_seconds()
-        dtFirstValid = datetime.datetime.fromtimestamp(begRefDTEopch)
-        begDTstr = dtFirstValid.strftime("%Y-%m-%d %H:%M:%S")
-    return begDTstr
 
-def downloadFromTQDB(tmpFile):
-	subprocess.call("./q1minall.sh '%s' '%s' '%s' '%s' '%d'" % (szSymbol,begDT,endDT,tmpFile,iGZip), shell=True, cwd=szBinDir)
+# Global configuration constants
+BIN_DIR = '/home/tqdb/codes/tqdb/tools/'  # TQ Database tools directory
+DEFAULT_SYMBOL = "WTF.506"  # Default test symbol
+DEFAULT_TIME_OFFSET = 0  # Time offset for queries
+LOCAL_TIME_OFFSET = 480  # Taiwan timezone offset (minutes)
+DEFAULT_GZIP = 1  # Enable gzip compression by default
+DEFAULT_REMOVE_FILE = 1  # Remove temporary files after processing
+DEFAULT_BEGIN_DT = '2030-5-23 11:45:00'  # Default start datetime (future date for testing)
+DEFAULT_END_DT = '2030-5-23 21:46:00'  # Default end datetime (future date for testing)
+FILE_TYPE_GZIP = 0  # File type: gzipped text
+FILE_TYPE_CSV = 1  # File type: CSV download
 
-def doCustomSymbol(tmpFile): 
-	profile = 'profile.ml.%s' % (szSymbol[2:])
-	subprocess.call("python ./q1min_multileg.py '%s' '%s' '%s' '%s' '%d'" % (profile,begDT,endDT,tmpFile,iGZip), 
-			shell=True, cwd="%s/../../tqdbPlus/" % szBinDir)
-	
-def loopReadFromStdin(tmpFile):
-	if (iGZip==1):
-		tmpFile = tmpFile+".gz"
-		filesize=os.path.getsize(tmpFile)
-		sys.stdout.write("Content-Length: %d\r\n" % filesize)
-		sys.stdout.write("Content-Encoding: gzip\r\n")
-	else:
-		pass
-	if (fileType==0):
-		sys.stdout.write("Content-Type: text/plain\r\n")
-	else:
-		sys.stdout.write("Content-Type: text/csv\r\n")
-                sys.stdout.write("Content-Disposition: attachment; filename=\"%s.1min.csv\"\r\n"%szSymbol);
-	sys.stdout.write("\r\n")
-        if (fileType==0):
-		pass
-	else:
-		sys.stdout.write("YYYYMMDD,HHMMSS,Open,High,Low,Close,Vol\r\n")
-	fp = file(tmpFile, 'rb')
-	sys.stdout.write(fp.read())
-	sys.stdout.flush()
-	
-	if (iRemoveQfile==1):
-		os.remove(tmpFile)
 
-querystrings=os.environ.get("QUERY_STRING", "NA=NA")
-mapQS={}
-for qs in querystrings.split("&"):
-        if qs.find("=") <= 0: continue
-        mapQS[qs.split("=")[0]] = urllib.unquote(qs.split("=")[1])
-if 'symbol' in mapQS:
-	szSymbol = mapQS['symbol']
-if 'timeoffset' in mapQS:
-	timeoffset = int(mapQS['timeoffset'])
-if ('BEG' in mapQS):
-	begDT=mapQS['BEG']
-if ('END' in mapQS):
-	endDT=mapQS['END']
-if ('csv' in mapQS):
-    if mapQS['csv']=='1':
-        fileType = 1 
-        iGZip = 0
+def get_first_valid_datetime(symbol, begin_dt_str, end_dt_str):
+    """
+    Retrieve the first valid datetime for a symbol within a date range.
+    
+    This function queries the qSymRefPrc.py service to find the earliest valid
+    trading data for a symbol, ensuring data availability for the requested range.
+    Specifically looks for MinBar (minute bar) data availability.
+    
+    Args:
+        symbol (str): Trading symbol to query
+        begin_dt_str (str): Start datetime string (YYYY-MM-DD HH:MM:SS)
+        end_dt_str (str): End datetime string (YYYY-MM-DD HH:MM:SS)
+        
+    Returns:
+        str: Validated begin datetime string with first available data
+        
+    Process:
+        1. Query reference price service for begin and end dates
+        2. Check if valid data exists in MinBar format
+        3. If same reference found for both dates, use that as start
+        4. Return original begin date if validation fails
+        
+    Note:
+        Used to ensure queries don't start before minute-level data availability
+    """
+    try:
+        target_type = 'MinBar'
+        begin_ref_dt, end_ref_dt = (-1, -1)
+        
+        # Query for begin date reference price
+        url = f'http://127.0.0.1/cgi-bin/qSymRefPrc.py?symbol={quote(symbol)}&qType=LastValidPrc&qDatetime={quote(begin_dt_str)}'
+        
+        with urlopen(url) as response:
+            obj = json.loads(response.read().decode('utf-8'))
+            
+        if obj is not None and target_type in obj and obj[target_type][0] is not None:
+            begin_ref_dt = obj[target_type][0]['datetime']
+        
+        # Query for end date reference price
+        url = f'http://127.0.0.1/cgi-bin/qSymRefPrc.py?symbol={quote(symbol)}&qType=LastValidPrc&qDatetime={quote(end_dt_str)}'
+        
+        with urlopen(url) as response:
+            obj = json.loads(response.read().decode('utf-8'))
+            
+        if obj is not None and target_type in obj and obj[target_type][0] is not None:
+            end_ref_dt = obj[target_type][0]['datetime']
+        
+        # If both dates have same reference, use reference as start
+        if begin_ref_dt != -1 and begin_ref_dt == end_ref_dt:
+            begin_ref_dt_obj = datetime.datetime.strptime(begin_ref_dt, "%Y-%m-%d %H:%M:%S")
+            begin_ref_dt_epoch = (begin_ref_dt_obj - datetime.datetime(1970, 1, 1)).total_seconds()
+            dt_first_valid = datetime.datetime.fromtimestamp(begin_ref_dt_epoch)
+            begin_dt_str = dt_first_valid.strftime("%Y-%m-%d %H:%M:%S")
+            
+        return begin_dt_str
+        
+    except Exception as e:
+        # Return original begin date if validation fails
+        print(f"Warning: Date validation failed: {e}", file=sys.stderr)
+        return begin_dt_str
 
-# if symbol is begin of ^^, it is a customer symbol !
-isCustomerSymbol = True if szSymbol.find('^^') == 0 else False
-if not isCustomerSymbol:
-    #typo !!
-    if ('MOSTHAVEBEG' in mapQS and mapQS['MOSTHAVEBEG'] != '0'):
-        begDT = getFirstValidDateTime(szSymbol, begDT, endDT)
-    if ('MUSTHAVEBEG' in mapQS and mapQS['MUSTHAVEBEG'] != '0'):
-        begDT = getFirstValidDateTime(szSymbol, begDT, endDT)
 
-tmpFile="/tmp/q1min.%d.%d"%(os.getpid(),time.mktime(datetime.datetime.now().timetuple()))
-if isCustomerSymbol:
-	doCustomSymbol(tmpFile)
-else:
-	downloadFromTQDB(tmpFile)
+def download_from_tqdb(symbol, begin_dt, end_dt, tmp_file, gzip_enabled):
+    """
+    Download minute-level data from TQ Database using shell script.
+    
+    Executes the q1minall.sh shell script to extract minute-level bar data
+    from the TQ Database for regular trading symbols. This aggregates tick data
+    into 1-minute OHLCV bars.
+    
+    Args:
+        symbol (str): Trading symbol to download
+        begin_dt (str): Start datetime string
+        end_dt (str): End datetime string
+        tmp_file (str): Temporary file path for output
+        gzip_enabled (int): Enable gzip compression (1=yes, 0=no)
+        
+    Process:
+        1. Calls q1minall.sh script with parameters
+        2. Script queries Cassandra database for tick data
+        3. Aggregates ticks into 1-minute OHLCV bars
+        4. Outputs to temporary file (optionally gzipped)
+        
+    Note:
+        Requires q1minall.sh script in BIN_DIR with execute permissions
+    """
+    try:
+        cmd = f"./q1minall.sh '{symbol}' '{begin_dt}' '{end_dt}' '{tmp_file}' '{gzip_enabled}'"
+        
+        subprocess.run(
+            cmd,
+            shell=True,
+            cwd=BIN_DIR,
+            check=True,
+            timeout=300  # 5 minute timeout
+        )
+        
+    except subprocess.TimeoutExpired:
+        raise Exception("TQ Database query timeout (5 minutes)")
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"TQ Database query failed: {e}")
+    except Exception as e:
+        raise Exception(f"Download error: {e}")
 
-loopReadFromStdin(tmpFile)
+
+def process_custom_symbol(symbol, begin_dt, end_dt, tmp_file, gzip_enabled):
+    """
+    Process custom multi-leg symbol data using specialized tool.
+    
+    Handles custom symbols (prefixed with ^^) that represent multi-leg
+    trading instruments requiring special processing logic. These symbols
+    typically represent synthetic instruments or complex trading strategies.
+    
+    Args:
+        symbol (str): Custom symbol starting with ^^
+        begin_dt (str): Start datetime string
+        end_dt (str): End datetime string
+        tmp_file (str): Temporary file path for output
+        gzip_enabled (int): Enable gzip compression (1=yes, 0=no)
+        
+    Process:
+        1. Creates profile name from symbol (removes ^^ prefix)
+        2. Calls q1min_multileg.py script in tqdbPlus directory
+        3. Processes multi-leg trading data with custom logic
+        4. Outputs minute-level aggregated data
+        
+    Note:
+        Requires tqdbPlus directory with q1min_multileg.py script
+        Profile files must exist in format: profile.ml.{symbol_name}
+    """
+    try:
+        # Create profile name by removing ^^ prefix
+        profile = f'profile.ml.{symbol[2:]}'
+        
+        cmd = f"python ./q1min_multileg.py '{profile}' '{begin_dt}' '{end_dt}' '{tmp_file}' '{gzip_enabled}'"
+        custom_dir = f"{BIN_DIR}/../../tqdbPlus/"
+        
+        subprocess.run(
+            cmd,
+            shell=True,
+            cwd=custom_dir,
+            check=True,
+            timeout=300  # 5 minute timeout
+        )
+        
+    except subprocess.TimeoutExpired:
+        raise Exception("Custom symbol processing timeout (5 minutes)")
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"Custom symbol processing failed: {e}")
+    except Exception as e:
+        raise Exception(f"Custom symbol error: {e}")
+
+
+def output_response_data(tmp_file, symbol, file_type, gzip_enabled, remove_file):
+    """
+    Output the generated data file as HTTP response.
+    
+    Sends the processed minute-level data to the client with appropriate
+    HTTP headers for content type, encoding, and disposition.
+    
+    Args:
+        tmp_file (str): Path to temporary data file
+        symbol (str): Symbol name for filename
+        file_type (int): Output format (0=gzip text, 1=CSV)
+        gzip_enabled (int): Gzip compression flag
+        remove_file (int): Remove temp file flag (1=yes, 0=no)
+        
+    HTTP Headers:
+        - Content-Type: text/plain or text/csv
+        - Content-Encoding: gzip (if enabled)
+        - Content-Length: File size
+        - Content-Disposition: attachment (for CSV downloads)
+        
+    Data Format:
+        - Text: Raw minute bar data from TQ Database tools
+        - CSV: YYYYMMDD,HHMMSS,Open,High,Low,Close,Vol format
+        
+    Process:
+        1. Set appropriate HTTP headers
+        2. Add CSV header row if CSV format
+        3. Stream file contents to stdout
+        4. Clean up temporary file if requested
+    """
+    try:
+        # Adjust filename for gzip
+        actual_file = f"{tmp_file}.gz" if gzip_enabled == 1 else tmp_file
+        
+        # Set HTTP headers based on compression and file type
+        if gzip_enabled == 1:
+            file_size = os.path.getsize(actual_file)
+            sys.stdout.write(f"Content-Length: {file_size}\r\n")
+            sys.stdout.write("Content-Encoding: gzip\r\n")
+        
+        if file_type == FILE_TYPE_GZIP:
+            sys.stdout.write("Content-Type: text/plain\r\n")
+        else:
+            sys.stdout.write("Content-Type: text/csv\r\n")
+            sys.stdout.write(f"Content-Disposition: attachment; filename=\"{symbol}.1min.csv\"\r\n")
+        
+        sys.stdout.write("\r\n")
+        
+        # Add CSV header if CSV format
+        if file_type == FILE_TYPE_CSV:
+            sys.stdout.write("YYYYMMDD,HHMMSS,Open,High,Low,Close,Vol\r\n")
+        
+        # Stream file contents
+        with open(actual_file, 'rb') as fp:
+            data = fp.read()
+            # Write binary data to stdout buffer
+            sys.stdout.buffer.write(data)
+            
+        sys.stdout.flush()
+        
+        # Clean up temporary file
+        if remove_file == 1:
+            if os.path.exists(actual_file):
+                os.remove(actual_file)
+            # Also remove uncompressed version if it exists
+            if gzip_enabled == 1 and os.path.exists(tmp_file):
+                os.remove(tmp_file)
+                
+    except Exception as e:
+        # Output error response
+        sys.stdout.write("Content-Type: text/plain\r\n")
+        sys.stdout.write("\r\n")
+        sys.stdout.write(f"Error outputting data: {e}\r\n")
+        sys.stdout.flush()
+
+
+def parse_query_parameters():
+    """
+    Parse CGI query string parameters for minute-level data request.
+    
+    Returns:
+        dict: Parsed parameters containing:
+            - symbol: Trading symbol
+            - timeoffset: Time offset for queries
+            - BEG: Begin datetime string
+            - END: End datetime string
+            - csv: CSV format flag (1=CSV download, 0=text)
+            - MUSTHAVEBEG/MOSTHAVEBEG: Date validation flags
+            
+    Query String Examples:
+        ?symbol=AAPL&BEG=2024-01-01%2009:30:00&END=2024-01-01%2016:00:00
+        ?symbol=^^CUSTOM&csv=1&BEG=2024-01-01%2009:30:00
+        ?symbol=SPY&MUSTHAVEBEG=1&BEG=2024-01-01%2009:30:00
+    """
+    query_string = os.environ.get("QUERY_STRING", "NA=NA")
+    params = {}
+    
+    # Parse each parameter from query string
+    for qs in query_string.split("&"):
+        if qs.find("=") <= 0:
+            continue
+        key, value = qs.split("=", 1)
+        params[key] = unquote(value)
+    
+    return params
+
+
+def main():
+    """
+    Main CGI execution function for minute-level data queries.
+    
+    Process:
+        1. Parse query string parameters
+        2. Configure output format and options
+        3. Validate date range (if requested)
+        4. Generate temporary file path
+        5. Process data (regular or custom symbol)
+        6. Output HTTP response with data
+        
+    Error Handling:
+        - Timeout protection for long-running queries
+        - Graceful handling of missing data
+        - Proper cleanup of temporary files
+        
+    Symbol Types:
+        - Regular symbols: Standard TQ Database symbols
+        - Custom symbols: Multi-leg symbols prefixed with ^^
+        
+    Date Validation:
+        - MUSTHAVEBEG/MOSTHAVEBEG: Ensures data availability from start date
+        - Prevents queries starting before historical data availability
+    """
+    # Initialize default values
+    symbol = DEFAULT_SYMBOL
+    gzip_enabled = DEFAULT_GZIP
+    remove_file = DEFAULT_REMOVE_FILE
+    begin_dt = DEFAULT_BEGIN_DT
+    end_dt = DEFAULT_END_DT
+    file_type = FILE_TYPE_GZIP
+    
+    try:
+        # Parse CGI parameters
+        params = parse_query_parameters()
+        
+        # Apply parameter values
+        if 'symbol' in params:
+            symbol = params['symbol']
+        if 'timeoffset' in params:
+            # Time offset parameter available for future use
+            pass  # Currently not used in processing logic
+        if 'BEG' in params:
+            begin_dt = params['BEG']
+        if 'END' in params:
+            end_dt = params['END']
+        if 'csv' in params and params['csv'] == '1':
+            file_type = FILE_TYPE_CSV
+            gzip_enabled = 0  # Disable gzip for CSV downloads
+        
+        # Check if symbol is custom (multi-leg)
+        is_custom_symbol = symbol.startswith('^^')
+        
+        # Validate date range for regular symbols (if requested)
+        if not is_custom_symbol:
+            # Handle parameter name variations (MOSTHAVEBEG/MUSTHAVEBEG)
+            if ('MOSTHAVEBEG' in params and params['MOSTHAVEBEG'] != '0') or \
+               ('MUSTHAVEBEG' in params and params['MUSTHAVEBEG'] != '0'):
+                begin_dt = get_first_valid_datetime(symbol, begin_dt, end_dt)
+        
+        # Generate unique temporary file path
+        tmp_file = f"/tmp/q1min.{os.getpid()}.{int(time.mktime(datetime.datetime.now().timetuple()))}"
+        
+        # Process data based on symbol type
+        if is_custom_symbol:
+            process_custom_symbol(symbol, begin_dt, end_dt, tmp_file, gzip_enabled)
+        else:
+            download_from_tqdb(symbol, begin_dt, end_dt, tmp_file, gzip_enabled)
+        
+        # Output response data
+        output_response_data(tmp_file, symbol, file_type, gzip_enabled, remove_file)
+        
+    except Exception as e:
+        # Output error response
+        sys.stdout.write("Content-Type: text/plain\r\n")
+        sys.stdout.write("\r\n")
+        sys.stdout.write(f"Error processing request: {e}\r\n")
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()
