@@ -297,33 +297,126 @@ sudo timedatectl set-timezone UTC
 ```
 
 #### Boot-time Configuration
+
+**Rocky 9 Modern Approach (Recommended):**
 ```bash
-# Setup startup scripts
-sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh /etc/init.d
-sudo chmod +x /etc/rc.d/rc.local
-echo '/etc/init.d/tqdbStartup.sh' | sudo tee -a /etc/rc.d/rc.local
+# 1. Set up environment profile (system-wide configuration)
 sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/profile_tqdb.sh /etc/profile.d/
 
-# Create systemd service (recommended for Rocky 9)
+# 2. Create systemd service for TQDB (modern Rocky 9 approach)
 sudo tee /etc/systemd/system/tqdb.service > /dev/null << 'EOF'
 [Unit]
-Description=TQDB Service
-After=network.target cassandra.service
+Description=TQDB Time-series Quote Database Service
+Documentation=https://github.com/wldtw2008/tqdb
+After=network-online.target cassandra.service
+Wants=network-online.target
+Requires=cassandra.service
 
 [Service]
-Type=oneshot
-ExecStart=/home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh
+Type=forking
 User=tqdb
-RemainAfterExit=yes
+Group=tqdb
+Environment=HOME=/home/tqdb
+Environment=USER=tqdb
+EnvironmentFile=-/etc/profile.d/profile_tqdb.sh
+ExecStartPre=/bin/mkdir -p /tmp/TQAlert
+ExecStartPre=/bin/chmod 777 /tmp/TQAlert
+ExecStart=/home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+TimeoutStartSec=60
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+
+# Security settings (Rocky 9 hardening)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp /var/log /home/tqdb
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+# 3. Enable and configure the service
+sudo systemctl daemon-reload
 sudo systemctl enable tqdb.service
 
-# Configure IPs and Ports
-sudo vi /etc/profile.d/profile_tqdb.sh  # Update relevant IPs & Ports
+# 4. Configure environment variables (edit as needed)
+sudo nano /etc/profile.d/profile_tqdb.sh
+# Update the following variables:
+# - CASS_IP (Cassandra IP address)
+# - CASS_PORT (default: 9042)
+# - D2TQ_IP (Data source IP)
+# - D2TQ_PORT (Data source port)
+# - TQDB_DIR (TQDB installation directory)
+
+# 5. Create systemd override for custom configuration (optional)
+sudo mkdir -p /etc/systemd/system/tqdb.service.d
+sudo tee /etc/systemd/system/tqdb.service.d/override.conf > /dev/null << 'EOF'
+[Service]
+# Add custom environment variables or override service settings here
+# Example:
+# Environment=CUSTOM_VAR=value
+EOF
+
+# 6. Verify service configuration
+sudo systemctl daemon-reload
+sudo systemctl status tqdb.service
+
+# 7. Test the service (optional - for immediate testing)
+# sudo systemctl start tqdb.service
+# sudo systemctl status tqdb.service
+```
+
+**Legacy Compatibility (Fallback for older systems):**
+```bash
+# For systems that still require SysV init compatibility
+sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh /etc/init.d/tqdbStartup
+sudo chmod +x /etc/rc.d/rc.local
+echo '/etc/init.d/tqdbStartup' | sudo tee -a /etc/rc.d/rc.local
+
+# Enable rc.local service (disabled by default in Rocky 9)
+sudo systemctl enable rc-local
+```
+
+**Service Management Commands:**
+```bash
+# Start TQDB service
+sudo systemctl start tqdb.service
+
+# Stop TQDB service
+sudo systemctl stop tqdb.service
+
+# Restart TQDB service
+sudo systemctl restart tqdb.service
+
+# Check service status
+sudo systemctl status tqdb.service
+
+# View service logs
+sudo journalctl -u tqdb.service -f
+
+# Disable service (if needed)
+sudo systemctl disable tqdb.service
+```
+
+**Enhanced Systemd Scripts (Optional):**
+
+For better reliability, enhanced startup/stop scripts are available:
+
+```bash
+# Make enhanced scripts executable
+chmod +x /home/tqdb/codes/tqdb/script_for_sys/tqdbStartup_systemd.sh
+chmod +x /home/tqdb/codes/tqdb/script_for_sys/tqdbStop.sh
+
+# These scripts provide:
+# - Better error handling and logging
+# - Service dependency checking
+# - Graceful shutdown procedures
+# - Health monitoring capabilities
 ```
 
 #### Additional Tools Installation
@@ -453,20 +546,6 @@ cat /tmp/autoIns2Cass.log
 
 # Manual test of tick insertion
 stdbuf -i0 -o0 -e0 netcat $D2TQ_IP $D2TQ_PORT | $TQDB_DIR/tools/itick $CASS_IP $CASS_PORT tqdb1 0 0
-```
-
-## Alternative Platforms
-
-### Non-RedHat/Rocky Systems
-For systems other than RedHat/Rocky Linux, use the following commands:
-
-```bash
-# Create symbolic links
-sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/profile_tqdb.sh /etc/profile.d/profile_tqdb.sh
-sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh /etc/init.d/tqdbStartup.sh
-
-# Configure startup service (for Debian/Ubuntu systems)
-cd /etc/init.d && sudo update-rc.d tqdbStartup.sh defaults
 ```
 
 ## Additional Resources
