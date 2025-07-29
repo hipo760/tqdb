@@ -303,7 +303,10 @@ sudo timedatectl set-timezone UTC
 # 1. Set up environment profile (system-wide configuration)
 sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/profile_tqdb.sh /etc/profile.d/
 
-# 2. Create systemd service for TQDB (modern Rocky 9 approach)
+# 2. Create systemd-compatible environment file
+sudo cp /home/tqdb/codes/tqdb/script_for_sys/tqdb.env /etc/systemd/system/tqdb.env
+
+# 3. Create systemd service for TQDB (modern Rocky 9 approach)
 sudo tee /etc/systemd/system/tqdb.service > /dev/null << 'EOF'
 [Unit]
 Description=TQDB Time-series Quote Database Service
@@ -318,7 +321,7 @@ User=tqdb
 Group=tqdb
 Environment=HOME=/home/tqdb
 Environment=USER=tqdb
-EnvironmentFile=-/etc/profile.d/profile_tqdb.sh
+EnvironmentFile=/etc/systemd/system/tqdb.env
 ExecStartPre=/bin/mkdir -p /tmp/TQAlert
 ExecStartPre=/bin/chmod 777 /tmp/TQAlert
 ExecStart=/home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh
@@ -344,14 +347,18 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable tqdb.service
 
-# 4. Configure environment variables (edit as needed)
-sudo nano /etc/profile.d/profile_tqdb.sh
-# Update the following variables:
+# 4. Configure environment variables in the systemd environment file
+sudo nano /etc/systemd/system/tqdb.env
+# Update the following variables as needed:
 # - CASS_IP (Cassandra IP address)
 # - CASS_PORT (default: 9042)
 # - D2TQ_IP (Data source IP)
 # - D2TQ_PORT (Data source port)
 # - TQDB_DIR (TQDB installation directory)
+
+# 5. Also configure shell environment (for manual script execution)
+sudo nano /etc/profile.d/profile_tqdb.sh
+# This file is used when running scripts manually or in shell sessions
 
 # 5. Create systemd override for custom configuration (optional)
 sudo mkdir -p /etc/systemd/system/tqdb.service.d
@@ -369,6 +376,31 @@ sudo systemctl status tqdb.service
 # 7. Test the service (optional - for immediate testing)
 # sudo systemctl start tqdb.service
 # sudo systemctl status tqdb.service
+```
+
+**Environment File Configuration:**
+
+The systemd service uses two environment configuration approaches:
+
+1. **For systemd service** (`/etc/systemd/system/tqdb.env`): 
+   - Simple `KEY=VALUE` format without shell expansions
+   - Used by systemd when running the service
+
+2. **For shell sessions** (`/etc/profile.d/profile_tqdb.sh`):
+   - Standard bash script with exports and parameter expansions
+   - Used when running scripts manually or in shell sessions
+
+**To modify environment variables:**
+```bash
+# Edit systemd environment file
+sudo nano /etc/systemd/system/tqdb.env
+
+# Edit shell environment file  
+sudo nano /etc/profile.d/profile_tqdb.sh
+
+# Apply changes
+sudo systemctl daemon-reload
+sudo systemctl restart tqdb.service
 ```
 
 **Legacy Compatibility (Fallback for older systems):**
@@ -547,6 +579,36 @@ cat /tmp/autoIns2Cass.log
 # Manual test of tick insertion
 stdbuf -i0 -o0 -e0 netcat $D2TQ_IP $D2TQ_PORT | $TQDB_DIR/tools/itick $CASS_IP $CASS_PORT tqdb1 0 0
 ```
+
+### Troubleshooting
+
+#### Common systemd Environment Issues
+If you see errors like "Ignoring invalid environment assignment" in systemd logs:
+
+1. **Check environment file format:**
+   ```bash
+   # Verify systemd environment file uses simple KEY=VALUE format
+   cat /etc/systemd/system/tqdb.env
+   ```
+
+2. **Fix invalid environment file:**
+   ```bash
+   # Remove export statements and shell expansions from systemd env file
+   sudo sed -i 's/^export //g' /etc/systemd/system/tqdb.env
+   sudo sed -i 's/\${[^}]*:-\([^}]*\)}/\1/g' /etc/systemd/system/tqdb.env
+   ```
+
+3. **Reload and restart service:**
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart tqdb.service
+   sudo systemctl status tqdb.service
+   ```
+
+4. **Check service logs:**
+   ```bash
+   sudo journalctl -u tqdb.service -f
+   ```
 
 ## Additional Resources
 
