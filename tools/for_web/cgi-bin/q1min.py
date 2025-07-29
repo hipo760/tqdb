@@ -306,6 +306,43 @@ def parse_query_parameters():
     return params
 
 
+def normalize_date_format(date_str):
+    """
+    Normalize date string to ensure proper zero-padding format.
+    
+    Converts dates like '2025-7-26' to '2025-07-26' format to ensure
+    proper parsing by downstream tools and database queries.
+    
+    Args:
+        date_str (str): Date string in various formats
+        
+    Returns:
+        str: Normalized date string with zero-padding
+    """
+    try:
+        # Handle different input formats
+        if date_str.count('-') == 2:
+            parts = date_str.split()
+            date_part = parts[0]
+            time_part = parts[1] if len(parts) > 1 else "00:00:00"
+            
+            # Split date components
+            year, month, day = date_part.split('-')
+            
+            # Zero-pad month and day
+            month = month.zfill(2)
+            day = day.zfill(2)
+            
+            # Reconstruct normalized date
+            return f"{year}-{month}-{day} {time_part}"
+        
+        return date_str
+        
+    except Exception as e:
+        print(f"Warning: Date normalization failed: {e}", file=sys.stderr)
+        return date_str
+
+
 def main():
     """
     Main CGI execution function for minute-level data queries.
@@ -342,17 +379,16 @@ def main():
     try:
         # Parse CGI parameters
         params = parse_query_parameters()
-        
-        # Apply parameter values
+          # Apply parameter values
         if 'symbol' in params:
             symbol = params['symbol']
         if 'timeoffset' in params:
             # Time offset parameter available for future use
             pass  # Currently not used in processing logic
         if 'BEG' in params:
-            begin_dt = params['BEG']
+            begin_dt = normalize_date_format(params['BEG'])
         if 'END' in params:
-            end_dt = params['END']
+            end_dt = normalize_date_format(params['END'])
         if 'csv' in params and params['csv'] == '1':
             file_type = FILE_TYPE_CSV
             gzip_enabled = 0  # Disable gzip for CSV downloads

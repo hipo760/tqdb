@@ -508,12 +508,12 @@ sudo reboot
 
 1. **Connect to Cassandra:**
    ```bash
-   /var/cassandra/bin/cqlsh
+   cqlsh localhost 9042
    ```
 
 2. **Create KeySpace and Tables:**
    ```sql
-   CREATE KEYSPACE tqdb1 WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 3 };
+   CREATE KEYSPACE tqdb1 WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
 
    CREATE TABLE tqdb1.tick (
        symbol text,
