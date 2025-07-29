@@ -244,12 +244,14 @@ def output_response_data(tmp_file, symbol, file_type, gzip_enabled, remove_file)
         else:
             sys.stdout.write("Content-Type: text/csv\r\n")
             sys.stdout.write(f"Content-Disposition: attachment; filename=\"{symbol}.1min.csv\"\r\n")
-        
+          # CRITICAL: Ensure headers are terminated before any content
         sys.stdout.write("\r\n")
+        sys.stdout.flush()
         
-        # Add CSV header if CSV format
-        if file_type == FILE_TYPE_CSV:
+        # Add CSV header if CSV format and not gzipped
+        if file_type == FILE_TYPE_CSV and gzip_enabled == 0:
             sys.stdout.write("YYYYMMDD,HHMMSS,Open,High,Low,Close,Vol\r\n")
+            sys.stdout.flush()
         
         # Stream file contents
         with open(actual_file, 'rb') as fp:
@@ -257,7 +259,7 @@ def output_response_data(tmp_file, symbol, file_type, gzip_enabled, remove_file)
             # Write binary data to stdout buffer
             sys.stdout.buffer.write(data)
             
-        sys.stdout.flush()
+        sys.stdout.buffer.flush()
         
         # Clean up temporary file
         if remove_file == 1:
