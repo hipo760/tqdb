@@ -1,0 +1,250 @@
+TQDB Complete Web URL Compatibility Guide
+=========================================
+
+Generated on: August 1, 2025
+Source: Complete analysis of tools/for_web/ directory structure
+Purpose: Modern Cassandra-based web UI compatibility requirements
+
+========================================================
+STATIC WEB PAGES (HTML)
+========================================================
+
+Main Application Pages:
+-----------------------
+/                           # Root - redirects to /esymbol.html
+/index.html                 # Root index - redirects to /esymbol.html  
+/esymbol.html              # Main symbol management interface
+/i1min.html                # 1-minute data import interface
+/edata.html                # Data editing interface
+/symsummery.html           # Symbol summary page
+/tqalert.html              # TQ Alert management page
+
+========================================================
+STATIC ASSETS
+========================================================
+
+Stylesheets:
+------------
+/style.css                 # Main application stylesheet
+/jquery-ui.css             # jQuery UI theme stylesheet
+/jquery-ui-timepicker-addon.css # Timepicker addon styles
+
+JavaScript Libraries:
+---------------------
+/js/jquery-2.1.4.min.js                # jQuery core library
+/js/jquery-ui.min.js                    # jQuery UI library
+/js/jquery-ui-sliderAccess.js           # Slider accessibility
+/js/jquery-ui-timepicker-addon.js       # Timepicker addon
+
+Images:
+-------
+/images/ui-icons_454545_256x240.png     # UI icons sprite
+
+========================================================
+CGI-BIN API ENDPOINTS (ACTIVE)
+========================================================
+
+Data Query APIs:
+----------------
+/cgi-bin/q1min.py           # Query 1-minute bar data
+/cgi-bin/q1sec.py           # Query 1-second bar data  
+/cgi-bin/q1day.py           # Query daily bar data
+/cgi-bin/qRange.py          # Query data within time range
+/cgi-bin/qtick.py           # Query tick data
+/cgi-bin/qquote.py          # Query quote data
+
+Symbol Management APIs:
+-----------------------
+/cgi-bin/qsyminfo.py        # Query symbol information (ALL symbols)
+/cgi-bin/qsymbol.py         # Query specific symbol data
+/cgi-bin/qSymSummery.py     # Query symbol summary statistics
+/cgi-bin/qSymRefPrc.py      # Query symbol reference price
+/cgi-bin/usymbol.py         # Update symbol information
+
+Data Import APIs:
+-----------------
+/cgi-bin/i1min_check.py     # Check/validate 1-minute data import
+/cgi-bin/i1min_do.py        # Execute 1-minute data import
+/cgi-bin/i1min_readstatus.py # Monitor import status
+
+Data Editing APIs:
+------------------
+/cgi-bin/eData.py           # Edit trading data (UPDATE/DELETE operations)
+/cgi-bin/eConf.py           # Edit configuration settings
+
+System Information APIs:
+------------------------
+/cgi-bin/qSystemInfo.py     # Query system information and status
+/cgi-bin/qSupportTZ.py      # Query supported timezones list
+
+Action/Command APIs:
+--------------------
+/cgi-bin/doAction.py        # Execute system actions (TQALERT_MUTE, etc.)
+
+Utility Module:
+---------------
+/cgi-bin/webcommon.py       # Common web utilities (not a URL endpoint)
+
+========================================================
+CRITICAL PARAMETERS TO SUPPORT
+========================================================
+
+Query Parameters (Data Query APIs):
+-----------------------------------
+- symbol                    # Trading symbol (supports "ALL" for qsyminfo.py)
+- BEG                       # Begin date/time (YYYY-MM-DD HH:MM:SS format)
+- END                       # End date/time (YYYY-MM-DD HH:MM:SS format)
+- csv=1                     # Return CSV format instead of JSON
+- timeoffset                # Time offset parameter
+- MOSTHAVEBEG/MUSTHAVEBEG   # Validate date range (typo variations exist)
+
+HTML Page Parameters:
+---------------------
+- sym                       # Symbol parameter passed to import pages
+- html=1                    # Return HTML format instead of JSON
+
+Import Form Parameters (multipart/form-data):
+---------------------------------------------
+- sym                       # Symbol name (text input)
+- file                      # CSV file upload
+- tzConv                    # Timezone conversion checkbox
+- tzSelect                  # Selected timezone from dropdown
+
+Edit Parameters:
+----------------
+- cmd                       # Operation command (UPDATE/DELETE/DELETERANGE)
+- epochFloatBeg             # Start time range (Unix timestamp)
+- epochFloatEnd             # End time range (Unix timestamp)
+- jsonObj                   # JSON data object for updates
+- table                     # Database table (minbar/secbar/tick)
+
+Configuration Parameters:
+-------------------------
+- confKey                   # Configuration key
+- confVal                   # Configuration value
+- cmd                       # QUERY/UPDATE operations
+
+Action Parameters:
+------------------
+- action                    # Action type (TQALERT_MUTE, etc.)
+
+========================================================
+RESPONSE FORMAT REQUIREMENTS
+========================================================
+
+Content-Type Headers:
+---------------------
+- application/json          # Default for API endpoints
+- text/csv                  # For CSV downloads (csv=1 parameter)
+- text/html                 # For HTML responses (html=1 parameter)
+- text/plain                # For plain text responses
+
+Special Headers:
+----------------
+- Content-Disposition: attachment; filename="symbol_data.csv"
+- Content-Encoding: gzip    # For compressed responses
+- Cache-Control: no-cache   # For real-time data
+
+AJAX Response Formats:
+----------------------
+- JSON arrays for data queries
+- JSON objects for symbol info
+- HTML strings for status updates
+- CSV strings for data exports
+
+========================================================
+FORM HANDLING REQUIREMENTS
+========================================================
+
+Import Form (i1min.html):
+--------------------------
+- Method: POST
+- Enctype: multipart/form-data
+- Action: cgi-bin/i1min_check.py?html=1
+- File upload support for CSV files
+- Timezone conversion with dropdown selection
+- Cookie-based timezone preference storage
+
+AJAX Requests:
+--------------
+- All data queries use GET with query parameters
+- jQuery.ajax() with JSON response parsing
+- Error handling with 404 status code detection
+- Success callbacks for UI updates
+
+========================================================
+URL ROUTING PATTERNS
+========================================================
+
+Static Content Routing:
+-----------------------
+/ → /esymbol.html (redirect)
+/index.html → /esymbol.html (redirect)
+/[filename].html → Direct serve
+/js/[filename] → Static JavaScript files
+/images/[filename] → Static image files
+/style.css → Main stylesheet
+
+API Routing Pattern:
+--------------------
+/cgi-bin/[script].py → Python CGI script execution
+All CGI scripts support both GET and POST methods
+Parameter passing via query string or form data
+
+========================================================
+COMPATIBILITY REQUIREMENTS FOR NEW UI
+========================================================
+
+1. MAINTAIN URL STRUCTURE:
+   - Keep /cgi-bin/ prefix for all API endpoints
+   - Preserve exact script names (including .py extension)
+   - Support same static file paths
+
+2. PARAMETER COMPATIBILITY:
+   - Support all existing parameter names exactly
+   - Handle both GET and POST methods
+   - Maintain form field names for imports
+   - Preserve typos in parameter names (MOSTHAVEBEG)
+
+3. RESPONSE FORMAT COMPATIBILITY:
+   - Return same JSON structure for API calls
+   - Support csv=1 parameter for CSV downloads
+   - Support html=1 parameter for HTML responses
+   - Maintain same error response formats
+
+4. FORM COMPATIBILITY:
+   - Support multipart/form-data for file uploads
+   - Handle same form field names
+   - Maintain redirect behavior after form submission
+
+5. JAVASCRIPT COMPATIBILITY:
+   - Ensure AJAX calls continue to work
+   - Maintain same response data structures
+   - Support existing jQuery usage patterns
+
+6. COOKIE HANDLING:
+   - Support timezone preference cookies
+   - Maintain same cookie names and formats
+
+7. SPECIAL FEATURES:
+   - Support ^^ prefix for multi-leg symbols
+   - Handle real-time status updates for imports
+   - Maintain timezone conversion functionality
+   - Support import ticket tracking system
+
+========================================================
+MIGRATION STRATEGY RECOMMENDATIONS
+========================================================
+
+1. Implement URL proxying/routing to maintain exact compatibility
+2. Create Cassandra data layer behind existing API structure
+3. Maintain CGI-style parameter handling in new framework
+4. Test all existing HTML pages with new backend
+5. Ensure file upload functionality works identically
+6. Validate CSV export format matches exactly
+7. Test timezone handling and conversion features
+8. Verify real-time status update functionality
+
+========================================================
+END OF COMPATIBILITY GUIDE
+========================================================

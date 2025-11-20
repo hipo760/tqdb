@@ -1,0 +1,111 @@
+TQDB CGI-bin URLs for Modern Web UI Compatibility
+========================================================
+
+ACTIVE CGI-BIN URLS (excluding legacy_python)
+=============================================
+
+Data Query URLs:
+----------------
+/cgi-bin/q1min.py           # Query 1-minute bar data
+/cgi-bin/q1sec.py           # Query 1-second bar data  
+/cgi-bin/q1day.py           # Query daily bar data
+/cgi-bin/qRange.py          # Query data within time range
+/cgi-bin/qtick.py           # Query tick data
+/cgi-bin/qquote.py          # Query quote data
+
+Symbol Management URLs:
+-----------------------
+/cgi-bin/qsyminfo.py        # Query symbol information
+/cgi-bin/qSymSummery.py     # Query symbol summary
+/cgi-bin/usymbol.py         # Update symbol information
+
+Data Import URLs:
+-----------------
+/cgi-bin/i1min_check.py     # Check/validate 1-minute data import
+/cgi-bin/i1min_do.py        # Execute 1-minute data import
+/cgi-bin/i1min_readstatus.py # Monitor import status
+
+Data Editing URLs:
+------------------
+/cgi-bin/eData.py           # Edit trading data (UPDATE/DELETE operations)
+/cgi-bin/eConf.py           # Edit configuration settings
+
+System Information URLs:
+------------------------
+/cgi-bin/qSystemInfo.py     # Query system information
+/cgi-bin/qSupportTZ.py      # Query supported timezones
+
+Action/Command URLs:
+--------------------
+/cgi-bin/doAction.py        # Execute system actions (TQALERT_MUTE, etc.)
+
+
+CRITICAL PARAMETERS TO SUPPORT:
+===============================
+
+Query Parameters (common across query URLs):
+--------------------------------------------
+- symbol                    # Trading symbol
+- BEG                       # Begin date/time 
+- END                       # End date/time
+- csv=1                     # Return CSV format
+- timeoffset                # Time offset parameter
+- MOSTHAVEBEG/MUSTHAVEBEG   # Validate date range (typo variations exist)
+
+Import Parameters:
+------------------
+- html=1                    # Return HTML format
+- importTicket              # Import job identifier
+- sym                       # Symbol form data
+- tzConv                    # Timezone conversion
+- tzSelect                  # Timezone selection
+- file                      # File upload
+
+Edit Parameters:
+----------------
+- cmd                       # Operation command (UPDATE/DELETE/DELETERANGE)
+- epochFloatBeg             # Start time range
+- epochFloatEnd             # End time range
+- jsonObj                   # JSON data object
+- table                     # Database table (minbar/secbar/tick)
+
+Configuration Parameters:
+-------------------------
+- confKey                   # Configuration key
+- confVal                   # Configuration value
+- cmd                       # QUERY/UPDATE operations
+
+
+RESPONSE FORMAT REQUIREMENTS:
+=============================
+
+Content-Type Headers:
+---------------------
+- application/json          # For JSON responses
+- text/csv                  # For CSV downloads
+- text/html                 # For HTML responses
+- text/plain                # For plain text
+
+Special Requirements:
+---------------------
+- CSV downloads need Content-Disposition header with filename
+- Support gzip compression (Content-Encoding: gzip)
+- HTML responses support meta refresh for status monitoring
+- Support ^^ prefix for multi-leg symbols
+- Handle multipart form data for CSV imports
+- Maintain same error response format as current system
+
+
+COMPATIBILITY NOTES:
+====================
+
+1. Maintain /cgi-bin/ prefix for backward compatibility
+2. Support all existing parameters identically
+3. Return JSON by default, HTML when html=1 parameter present
+4. Support file uploads for CSV imports
+5. Implement real-time status updates for import monitoring
+6. Handle both GET and POST requests as current system does
+7. Preserve exact parameter names (including typos like MOSTHAVEBEG)
+
+Generated on: August 1, 2025
+Source: Active CGI scripts in tools/for_web/cgi-bin/ (legacy_python excluded)

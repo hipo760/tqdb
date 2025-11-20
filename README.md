@@ -18,6 +18,7 @@
     - [Verify Cassandra Installation](#verify-cassandra-installation)
     - [Create Legacy-Style Directory Structure](#create-legacy-style-directory-structure)
     - [Install Cassandra C++ Driver](#install-cassandra-c-driver)
+    - [Create Cassandra KeySpace and Tables](#create-cassandra-keyspace-and-tables)
   - [6. Apache HTTP Server (httpd) Configuration](#6-apache-http-server-httpd-configuration)
   - [7. System Configuration](#7-system-configuration)
     - [Timezone Setup](#timezone-setup)
@@ -25,8 +26,6 @@
     - [Additional Tools Installation](#additional-tools-installation)
     - [Cron Job Configuration](#cron-job-configuration)
   - [8. Final Setup and Reboot](#8-final-setup-and-reboot)
-- [Database Schema Setup](#database-schema-setup)
-  - [Cassandra KeySpace and Tables](#cassandra-keyspace-and-tables)
 - [System Verification](#system-verification)
   - [Post-Installation Checks](#post-installation-checks)
     - [1. Verify Demo Data Service](#1-verify-demo-data-service)
@@ -160,6 +159,9 @@ repo_gpgcheck=1
 gpgkey=https://downloads.apache.org/cassandra/KEYS
 EOF
 
+# Install chkconfig for systemd-sysv compatibility (required for Cassandra service management on Rocky 9)
+sudo dnf install -y chkconfig
+
 # Install Cassandra
 sudo dnf install -y cassandra
 
@@ -274,6 +276,69 @@ rm -f /tmp/*.rpm
 echo "Testing with TQDB tools..."
 /home/tqdb/codes/tqdb/tools/itick  # Run this to verify cpp-driver works with TQDB
 ```
+
+#### Create Cassandra KeySpace and Tables
+
+After Cassandra is installed and running, create the database schema:
+
+1. **Connect to Cassandra:**
+   ```bash
+   cqlsh localhost 9042
+   ```
+
+2. **Create KeySpace and Tables:**
+   ```sql
+   CREATE KEYSPACE tqdb1 WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
+
+   CREATE TABLE tqdb1.tick (
+       symbol text,
+       datetime timestamp,
+       keyval map<text, double>,
+       type int,
+       PRIMARY KEY (symbol, datetime)
+   );
+
+   CREATE TABLE tqdb1.symbol (
+       symbol text PRIMARY KEY,
+       keyval map<text, text>
+   );
+
+   CREATE TABLE tqdb1.minbar (
+       symbol text,
+       datetime timestamp,
+       close double,
+       high double,
+       low double,
+       open double,
+       vol double,
+       PRIMARY KEY (symbol, datetime)
+   );
+
+   CREATE TABLE tqdb1.secbar (
+       symbol text,
+       datetime timestamp,
+       close double,
+       high double,
+       low double,
+       open double,
+       vol double,
+       PRIMARY KEY (symbol, datetime)
+   );
+
+   CREATE TABLE tqdb1.conf (
+       confKey text PRIMARY KEY,
+       confVal text
+   );
+   ```
+
+3. **Verify the schema creation:**
+   ```bash
+   # List keyspaces
+   cqlsh -e "DESCRIBE KEYSPACES;"
+   
+   # Describe the tqdb1 keyspace
+   cqlsh -e "DESCRIBE KEYSPACE tqdb1;"
+   ```
 
 ### 6. Apache HTTP Server (httpd) Configuration
 
@@ -502,59 +567,6 @@ Add the following cron jobs:
 sudo reboot
 ```
 
-## Database Schema Setup
-
-### Cassandra KeySpace and Tables
-
-1. **Connect to Cassandra:**
-   ```bash
-   cqlsh localhost 9042
-   ```
-
-2. **Create KeySpace and Tables:**
-   ```sql
-   CREATE KEYSPACE tqdb1 WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
-
-   CREATE TABLE tqdb1.tick (
-       symbol text,
-       datetime timestamp,
-       keyval map<text, double>,
-       type int,
-       PRIMARY KEY (symbol, datetime)
-   );
-
-   CREATE TABLE tqdb1.symbol (
-       symbol text PRIMARY KEY,
-       keyval map<text, text>
-   );
-
-   CREATE TABLE tqdb1.minbar (
-       symbol text,
-       datetime timestamp,
-       close double,
-       high double,
-       low double,
-       open double,
-       vol double,
-       PRIMARY KEY (symbol, datetime)
-   );
-
-   CREATE TABLE tqdb1.secbar (
-       symbol text,
-       datetime timestamp,
-       close double,
-       high double,
-       low double,
-       open double,
-       vol double,
-       PRIMARY KEY (symbol, datetime)
-   );
-
-   CREATE TABLE tqdb1.conf (
-       confKey text PRIMARY KEY,
-       confVal text
-   );
-   ```
 ## System Verification
 
 ### Post-Installation Checks
