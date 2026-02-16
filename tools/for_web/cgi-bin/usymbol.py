@@ -108,31 +108,36 @@ def update_symbol_in_database(symbol, parameters):
     Returns:
         bool: True if update was successful, False otherwise
     """
-    if not symbol:
-        return False
+    # import logging
+    # logging.basicConfig(filename='/var/log/tqdb/usymbol.log', level=logging.ERROR)
     
+    if not symbol:
+        send_error_response("No symbol specified.")
+        return False
     try:
         # Construct command to run Sym2Cass.py utility
         # Updated for Python 3 compatibility
         command = f"python3 Sym2Cass.py {CASSANDRA_IP} {CASSANDRA_PORT} '{CASSANDRA_DB}' '{symbol}' '{json.dumps(parameters)}' > /dev/null"
         
+        send_error_response(f"Executing command: {command}")  # For debugging
+   
         # Execute the command in the tools directory
         result = subprocess.call(
             command, 
             shell=True, 
             cwd=TOOLS_DIR,
-            timeout=30  # Add timeout for safety
         )
         
         return result == 0  # Return True if command succeeded
         
     except subprocess.TimeoutExpired:
         # Handle timeout case
+        send_error_response("Database update timed out.")
         return False
-    except Exception:
+    except Exception as e:
         # Handle other exceptions
+        send_error_response(f"System error during database update: {str(e)}")
         return False
-
 
 def send_redirect_response():
     """
@@ -220,6 +225,6 @@ if __name__ == "__main__":
         
         # Optional: Log error to system log for debugging
         # You can uncomment the following lines if you want to log errors
-        # import logging
-        # logging.basicConfig(filename='/var/log/tqdb/usymbol.log', level=logging.ERROR)
-        # logging.error(f"usymbol.py error: {str(e)}")
+        import logging
+        logging.basicConfig(filename='/home/tqdb/usymbol.log', level=logging.ERROR)
+        logging.error(f"usymbol.py error: {str(e)}")

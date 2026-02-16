@@ -34,7 +34,8 @@ param = {
     'Sym': '',         # Trading symbol
     'Lines': [],       # Parsed CSV data lines
     'Log': '',         # Log messages
-    'tzFromTo': None   # Timezone conversion parameters
+    'tzFromTo': None,  # Timezone conversion parameters
+    'Import': ''       # Auto-import flag ('y' to auto-import)
 }
 
 # Generate unique import ticket based on timestamp and process ID
@@ -62,6 +63,11 @@ def process_post_data():
     sym = form.getvalue('sym')
     if sym:
         param['Sym'] = sym
+
+    # Extract auto-import flag from form
+    auto_import = form.getvalue('import')
+    if auto_import:
+        param['Import'] = auto_import
 
     # Handle timezone conversion settings
     tz_conv = form.getvalue('tzConv')
@@ -367,6 +373,12 @@ def output_html_response(ret_obj):
 
     sys.stdout.write('</table>\n')
     
+    # Auto-import if requested
+    if param['Import'] == 'y':
+        cmd = f'curl http://127.0.0.1/cgi-bin/i1min_do.py?importTicket={import_ticket}'
+        sys.stdout.write(f'\n{import_ticket} has been imported\n')
+        subprocess.call(cmd, shell=True)
+    
     # Add confirmation button
     sys.stdout.write(f'<input type="button" '
                     f'onclick="location.href=\'/cgi-bin/i1min_do.py?importTicket={import_ticket}\'" '
@@ -405,3 +417,4 @@ if __name__ == "__main__":
         output_json_response(response_data)
     
     sys.stdout.flush()
+

@@ -7,7 +7,7 @@ export CASS_IP=${CASS_IP:-127.0.0.1}
 export CASS_PORT=${CASS_PORT:-9042}
 
 # Data Source Configuration
-export D2TQ_IP=${D2TQ_IP:-192.168.56.1}
+export D2TQ_IP=${D2TQ_IP:-172.16.100.158}
 export D2TQ_PORT=${D2TQ_PORT:-14568}
 
 # TQDB Installation Directory

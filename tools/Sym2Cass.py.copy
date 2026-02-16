@@ -61,9 +61,7 @@ def delete_symbol():
         session.set_keyspace(cassandra_db)
         
         # Execute delete query using parameterized query for security
-        delete_query = f"DELETE FROM {cassandra_db}.symbol WHERE symbol = %s"
-        print(f"[DEBUG] Delete query: {delete_query}")
-        print(f"[DEBUG] Parameters: [{symbol}]")
+        delete_query = f"DELETE FROM {cassandra_db}.symbol WHERE symbol = ?"
         session.execute(delete_query, [symbol])
         
         print(f"Symbol '{symbol}' deleted successfully.")
@@ -115,28 +113,22 @@ def insert_or_update_symbol():
         merged_params = default_params.copy()
         merged_params.update(symbol_info)
         
-        # Note: keyval column is map<text, text> in Cassandra, pass as dict
-        print(f"[DEBUG] Data to store (as dict): {merged_params}")
+        # Convert to JSON string with single quotes (Cassandra format)
+        json_data = json.dumps(merged_params).replace('"', "'")
         
         # Check if symbol already exists
-        select_query = f"SELECT * FROM {cassandra_db}.symbol WHERE symbol = %s"
-        print(f"[DEBUG] Select query: {select_query}")
-        print(f"[DEBUG] Parameters: [{symbol}]")
+        select_query = f"SELECT * FROM {cassandra_db}.symbol WHERE symbol = ?"
         result = session.execute(select_query, [symbol])
         
         if result and len(list(result)) > 0:
             # Update existing symbol
-            update_query = f"UPDATE {cassandra_db}.symbol SET keyval = %s WHERE symbol = %s"
-            print(f"[DEBUG] Update query: {update_query}")
-            print(f"[DEBUG] Parameters: [dict={merged_params}, symbol='{symbol}']")
-            session.execute(update_query, [merged_params, symbol])
+            update_query = f"UPDATE {cassandra_db}.symbol SET keyval = ? WHERE symbol = ?"
+            session.execute(update_query, [json_data, symbol])
             print(f"Symbol '{symbol}' updated successfully.")
         else:
             # Insert new symbol
-            insert_query = f"INSERT INTO {cassandra_db}.symbol (symbol, keyval) VALUES (%s, %s)"
-            print(f"[DEBUG] Insert query: {insert_query}")
-            print(f"[DEBUG] Parameters: [symbol='{symbol}', dict={merged_params}]")
-            session.execute(insert_query, [symbol, merged_params])
+            insert_query = f"INSERT INTO {cassandra_db}.symbol (symbol, keyval) VALUES (?, ?)"
+            session.execute(insert_query, [symbol, json_data])
             print(f"Symbol '{symbol}' inserted successfully.")
         
         # Clean up connections
@@ -229,4 +221,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
