@@ -1,658 +1,221 @@
-# TQDB Rocky Linux 9 Installation Guide
+# TQDB - Time-Series Quote Database
 
-## Table of Contents
+A high-performance containerized time-series database system for financial market data, built on Apache Cassandra with exchange-specific data distribution.
 
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-  - [User Setup](#user-setup)
-- [Installation Steps](#installation-steps)
-  - [1. System Preparation](#1-system-preparation)
-    - [Network Configuration](#network-configuration)
-    - [Install Required Packages](#install-required-packages)
-    - [Hostname Configuration (Optional)](#hostname-configuration-optional)
-  - [2. Security Configuration](#2-security-configuration)
-  - [3. Source Code Setup](#3-source-code-setup)
-  - [4. Java Installation](#4-java-installation)
-  - [5. Cassandra Installation and Configuration](#5-cassandra-installation-and-configuration)
-    - [Install Cassandra](#install-cassandra)
-    - [Verify Cassandra Installation](#verify-cassandra-installation)
-    - [Create Legacy-Style Directory Structure](#create-legacy-style-directory-structure)
-    - [Install Cassandra C++ Driver](#install-cassandra-c-driver)
-    - [Create Cassandra KeySpace and Tables](#create-cassandra-keyspace-and-tables)
-  - [6. Apache HTTP Server (httpd) Configuration](#6-apache-http-server-httpd-configuration)
-  - [7. System Configuration](#7-system-configuration)
-    - [Timezone Setup](#timezone-setup)
-    - [Boot-time Configuration](#boot-time-configuration)
-    - [Additional Tools Installation](#additional-tools-installation)
-    - [Cron Job Configuration](#cron-job-configuration)
-  - [8. Final Setup and Reboot](#8-final-setup-and-reboot)
-- [System Verification](#system-verification)
-  - [Post-Installation Checks](#post-installation-checks)
-    - [1. Verify Demo Data Service](#1-verify-demo-data-service)
-    - [2. Verify Cassandra Data Insertion](#2-verify-cassandra-data-insertion)
-- [Alternative Platforms](#alternative-platforms)
-  - [Non-RedHat/Rocky Systems](#non-redhatrocky-systems)
-- [Additional Resources](#additional-resources)
-  - [VirtualBox VM Download](#virtualbox-vm-download)
-- [Rocky 9 Specific Notes](#rocky-9-specific-notes)
-- [Security Considerations for Production](#security-considerations-for-production)
-- [Notes](#notes)
+## 🚀 Quick Start
 
-## Overview
-This guide provides step-by-step instructions for installing and configuring TQDB (Time-series Quote Database) on Rocky Linux 9.
-
-## Prerequisites
-
-### User Setup
-**Important:** All steps below must be executed as user 'tqdb'. Create and configure this user first:
-
+### Current System (Legacy)
 ```bash
-# Create the tqdb user
-sudo useradd -m tqdb
-sudo passwd tqdb  # Set password for user 'tqdb'
-sudo usermod -aG wheel tqdb  # Add to wheel group for sudo privileges
+# See docs/legacy/ for Rocky Linux 9 and CentOS 7 installation guides
 ```
 
-## Installation Steps
-
-### 1. System Preparation
-
-#### Network Configuration
+### Modern Deployment (Recommended)
 ```bash
-# Configure network using nmtui
-sudo nmtui
+# Single-node development setup
+docker-compose up -d
+
+# Multi-node cluster with exchange-specific distribution
+# See DEPLOYMENT_GUIDE.md for complete setup
 ```
 
-#### Install Required Packages
-```bash
-# Enable EPEL repository
-sudo dnf install -y epel-release
+## 📚 Documentation
 
-# Install essential packages
-sudo dnf install -y wget git nc python3-pip python3-dateutil net-tools httpd chrony
-sudo systemctl enable chronyd && sudo systemctl start chronyd
-sudo dnf update -y
+### Core Documentation (3 files)
+1. **[README.md](README.md)** (this file) - Project overview and quick start
+2. **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** - Complete deployment guide
+   - Two-phase modernization plan
+   - Multi-node cluster architecture
+   - Exchange-specific data distribution
+   - Docker setup and configuration
+3. **[OPERATIONS.md](OPERATIONS.md)** - Daily operations
+   - Backfill procedures
+   - Monitoring and troubleshooting
+   - Maintenance tasks
 
-# Create symbolic links
-sudo ln -sf /usr/bin/nc /usr/bin/netcat
+### Legacy Documentation
+- **[docs/legacy/ROCKY9_INSTALL.md](docs/legacy/ROCKY9_INSTALL.md)** - Rocky Linux 9 installation
+- **[docs/legacy/CENTOS7_INSTALL.md](docs/legacy/CENTOS7_INSTALL.md)** - CentOS 7 installation
 
-# Upgrade pip and install Python packages
-sudo python3 -m pip install --upgrade pip
-sudo python3 -m pip install cassandra-driver
+### Tools Documentation
+- **[tools/](tools/)** - Processing tools and utilities
+
+## 🎯 Features
+
+### Current System
+- Real-time ingestion (tick, second, minute bars)
+- Multiple exchange support (NYSE, NASDAQ, HKEX)
+- C++ and Python data processing tools
+- Web-based query interface
+
+### Modern System (In Progress)
+- **Containerized deployment** - Docker Compose orchestration
+- **Exchange-specific distribution** - 33% storage savings
+- **High availability** - Multi-node cluster with RF=2
+- **Modern web UI** - SvelteKit interface (Phase 2)
+- **RESTful API** - Backward compatible (Phase 2)
+
+## 🏗️ Architecture
+
+### Exchange-Specific Data Distribution
+
+```
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│   Master      │  │   NYSE Node   │  │  NASDAQ Node  │  │   HKEX Node   │
+├───────────────┤  ├───────────────┤  ├───────────────┤  ├───────────────┤
+│ NYSE: 100GB   │  │ NYSE: 100GB   │  │ NASDAQ: 80GB  │  │ HKEX: 60GB    │
+│ NASDAQ: 80GB  │  │               │  │               │  │               │
+│ HKEX: 60GB    │  │               │  │               │  │               │
+├───────────────┤  ├───────────────┤  ├───────────────┤  ├───────────────┤
+│ Total: 240GB  │  │ Total: 100GB  │  │ Total: 80GB   │  │ Total: 60GB   │
+└───────────────┘  └───────────────┘  └───────────────┘  └───────────────┘
+
+Cluster Total: 480GB (33% savings vs 720GB full replication)
 ```
 
-#### Hostname Configuration (Optional)
-```bash
-# Check current hostname
-hostnamectl
+**Key Benefits:**
+- Master node maintains complete dataset for analytics
+- Exchange nodes store only their market data
+- Query any node to access any exchange data (driver routing)
+- No external load balancer needed
 
-# Set new hostname (replace TQDBXXXX with desired name)
-sudo hostnamectl set-hostname TQDBXXXX
+## 📦 Project Structure
+
+```
+tqdb/
+├── README.md                    # This file - project overview
+├── DEPLOYMENT_GUIDE.md          # Complete deployment guide
+├── OPERATIONS.md                # Operational procedures
+├── Demo.ipynb                   # Jupyter notebook demo
+│
+├── docker-compose.yml           # Development setup (future)
+├── docker-compose.cluster.yml   # Cluster setup (future)
+│
+├── docs/                        
+│   └── legacy/                  # Legacy installation guides
+│       ├── ROCKY9_INSTALL.md
+│       └── CENTOS7_INSTALL.md
+│
+├── tools/                       # Data processing tools
+│   ├── q1min, q1sec            # Query tools
+│   ├── Min2Cass.py, Sec2Cass.py # Importers
+│   └── for_web/                # Web interface
+│
+└── script_for_sys/              # System scripts
 ```
 
-### 2. Security Configuration
+## 🔧 Technology Stack
 
-```bash
-# Configure firewall (Rocky 9 uses firewalld by default)
-# Configure firewall rules for required services
-sudo firewall-cmd --permanent --add-service=http
-sudo firewall-cmd --permanent --add-service=https
-sudo firewall-cmd --permanent --add-port=9042/tcp  # Cassandra
-sudo firewall-cmd --permanent --add-port=4568/tcp  # Demo server
-sudo firewall-cmd --reload
+### Current
+- **Database**: Apache Cassandra 3.x
+- **Backend**: C++, Python 2.7
+- **Web**: Apache httpd, CGI
+- **OS**: Rocky Linux 9, CentOS 7
 
-# Configure SELinux (recommended: keep enabled for security)
-# Set SELinux to permissive mode for TQDB compatibility (safer than disabled)
-sudo setenforce 0
-sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
+### Target (Modern)
+- **Database**: Cassandra 4.1 / ScyllaDB
+- **Backend**: Python 3.11+, Node.js
+- **Web**: SvelteKit, Nginx
+- **Deploy**: Docker, Docker Compose
+- **OS**: Any Linux (containerized)
 
-# Alternative: For development/testing only - disable SELinux completely (NOT recommended for production)
-# sudo sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+## 🚦 Getting Started
 
-# Configure SSH security
-sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-sudo systemctl restart sshd
+### For New Deployments
 
-# Reboot to apply changes
-sudo reboot
-```
-
-### 3. Source Code Setup
-
-```bash
-# Create necessary directories
-mkdir /home/tqdb/codes 
-mkdir /home/tqdb/oldtick
-
-# Clone TQDB repository
-git clone https://github.com/wldtw2008/tqdb.git /home/tqdb/codes/tqdb
-```
-
-### 4. Java Installation
-
-```bash
-# Install Java 11 (recommended for Rocky 9)
-sudo dnf install -y java-11-openjdk java-11-openjdk-devel
-
-# Verify installation
-java -version
-
-# Set JAVA_HOME environment variable
-echo 'export JAVA_HOME=/usr/lib/jvm/java-11-openjdk' | sudo tee -a /etc/environment
-source /etc/environment
-```
-
-### 5. Cassandra Installation and Configuration
-
-#### Install Cassandra
-Reference: [Apache Cassandra Installation Guide](https://cassandra.apache.org/doc/latest/getting_started/installing.html)
-
-```bash
-# Add Apache Cassandra repository
-cat << 'EOF' | sudo tee /etc/yum.repos.d/cassandra.repo
-[cassandra]
-name=Apache Cassandra 4.1
-baseurl=https://redhat.cassandra.apache.org/41x/
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://downloads.apache.org/cassandra/KEYS
-EOF
-
-# Install chkconfig for systemd-sysv compatibility (required for Cassandra service management on Rocky 9)
-sudo dnf install -y chkconfig
-
-# Install Cassandra
-sudo dnf install -y cassandra
-
-# Enable and start Cassandra service
-sudo systemctl enable cassandra
-sudo systemctl start cassandra
-```
-
-#### Verify Cassandra Installation
-```bash
-# Check if Cassandra is running
-sudo systemctl status cassandra
-```
-
-#### Create Legacy-Style Directory Structure
-```bash
-# Create compatibility directories and symlinks
-sudo mkdir -p /var/cassandra-oldverlike
-sudo ln -sf /var/cassandra-oldverlike /var/cassandra
-sudo mkdir -p /var/cassandra/bin
-sudo ln -sf /usr/bin/nodetool /var/cassandra/bin/
-sudo ln -sf /usr/bin/cqlsh /var/cassandra/bin/
-sudo ln -sf /usr/bin/cqlsh.py /var/cassandra/bin/
-sudo ln -sf /var/lib/cassandra/ /var/cassandra/data
-sudo ln -sf /etc/cassandra/ /var/cassandra/conf
-```
-
-#### Install Cassandra C++ Driver
-```bash
-# Install basic dependencies
-sudo dnf install -y wget
-
-# Download and install DataStax C++ driver packages for Rocky Linux
-cd /tmp
-
-# Download the main driver package
-wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/cassandra/v2.17.1/cassandra-cpp-driver-2.17.1-1.el9.x86_64.rpm
-
-# Download the development package
-wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/cassandra/v2.17.1/cassandra-cpp-driver-devel-2.17.1-1.el9.x86_64.rpm
-
-# Download dependencies (libuv)
-wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/dependencies/libuv/v1.34.0/libuv-1.34.0-1.el9.x86_64.rpm
-wget https://datastax.jfrog.io/artifactory/cpp-php-drivers/cpp-driver/builds/2.17.1/e05897d/rocky/9.2/dependencies/libuv/v1.34.0/libuv-devel-1.34.0-1.el9.x86_64.rpm
-
-# Install the packages in correct order (dependencies first)
-sudo rpm -ivh libuv-1.34.0-1.el9.x86_64.rpm
-sudo rpm -ivh libuv-devel-1.34.0-1.el9.x86_64.rpm
-sudo rpm -ivh cassandra-cpp-driver-2.17.1-1.el9.x86_64.rpm
-sudo rpm -ivh cassandra-cpp-driver-devel-2.17.1-1.el9.x86_64.rpm
-
-# Update library cache
-sudo ldconfig
-
-# Verify installation
-echo "Checking installed packages..."
-rpm -qa | grep -E "(cassandra|libuv)"
-
-echo "Checking library files..."
-ldconfig -p | grep cassandra
-ls -la /usr/lib64/libcassandra*
-
-echo "Checking header files..."
-ls -la /usr/include/cassandra*
-```
-
-
-#### Test the C++ driver installation
-```bash
-echo "Testing C++ driver compilation..."
-cat > /tmp/test_cassandra.cpp << 'EOF'
-#include <cassandra.h>
-#include <iostream>
-
-int main() {
-    std::cout << "Cassandra C++ Driver test - basic functionality check" << std::endl;
-    
-    // Test basic cluster creation
-    CassCluster* cluster = cass_cluster_new();
-    if (cluster) {
-        std::cout << "✓ Successfully created Cassandra cluster object" << std::endl;
-        
-        // Test session creation
-        CassSession* session = cass_session_new();
-        if (session) {
-            std::cout << "✓ Successfully created Cassandra session object" << std::endl;
-            cass_session_free(session);
-        } else {
-            std::cout << "✗ Failed to create session object" << std::endl;
-        }
-        
-        cass_cluster_free(cluster);
-    } else {
-        std::cout << "✗ Failed to create cluster object" << std::endl;
-        return 1;
-    }
-    
-    std::cout << "✓ Cassandra C++ Driver is working correctly" << std::endl;
-    return 0;
-}
-EOF
-
-# Compile and run test
-g++ -o /tmp/test_cassandra /tmp/test_cassandra.cpp -lcassandra
-/tmp/test_cassandra
-
-# Clean up test files and downloads
-rm -f /tmp/test_cassandra /tmp/test_cassandra.cpp
-rm -f /tmp/*.rpm
-
-# Final verification with TQDB tools
-echo "Testing with TQDB tools..."
-/home/tqdb/codes/tqdb/tools/itick  # Run this to verify cpp-driver works with TQDB
-```
-
-#### Create Cassandra KeySpace and Tables
-
-After Cassandra is installed and running, create the database schema:
-
-1. **Connect to Cassandra:**
+1. **Read the deployment guide**
    ```bash
-   cqlsh localhost 9042
+   cat DEPLOYMENT_GUIDE.md
    ```
 
-2. **Create KeySpace and Tables:**
-   ```sql
-   CREATE KEYSPACE tqdb1 WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
+2. **Choose your approach**
+   - **Phase 1 Only**: Modern infrastructure, keep legacy UI (4-6 weeks)
+   - **Phase 1 + 2**: Full modernization (16-22 weeks)
 
-   CREATE TABLE tqdb1.tick (
-       symbol text,
-       datetime timestamp,
-       keyval map<text, double>,
-       type int,
-       PRIMARY KEY (symbol, datetime)
-   );
+3. **Start with single-node dev setup** (Phase 1.1)
 
-   CREATE TABLE tqdb1.symbol (
-       symbol text PRIMARY KEY,
-       keyval map<text, text>
-   );
+### For Existing Installations
 
-   CREATE TABLE tqdb1.minbar (
-       symbol text,
-       datetime timestamp,
-       close double,
-       high double,
-       low double,
-       open double,
-       vol double,
-       PRIMARY KEY (symbol, datetime)
-   );
-
-   CREATE TABLE tqdb1.secbar (
-       symbol text,
-       datetime timestamp,
-       close double,
-       high double,
-       low double,
-       open double,
-       vol double,
-       PRIMARY KEY (symbol, datetime)
-   );
-
-   CREATE TABLE tqdb1.conf (
-       confKey text PRIMARY KEY,
-       confVal text
-   );
-   ```
-
-3. **Verify the schema creation:**
+1. **Assess current system**
    ```bash
-   # List keyspaces
-   cqlsh -e "DESCRIBE KEYSPACES;"
-   
-   # Describe the tqdb1 keyspace
-   cqlsh -e "DESCRIBE KEYSPACE tqdb1;"
+   nodetool status
+   du -sh /var/lib/cassandra/data/tqdb
    ```
 
-### 6. Apache HTTP Server (httpd) Configuration
+2. **Plan migration** - See DEPLOYMENT_GUIDE.md Section 5
 
-```bash
-# Configure web-related settings
-cd /home/tqdb/codes/tqdb/tools/for_web && sudo ./buildApache.sh
+3. **Execute** - See OPERATIONS.md for procedures
 
-# Enable and start Apache
-sudo systemctl enable httpd && sudo systemctl restart httpd
+## 📊 Data Model
+
+### Keyspaces (Exchange-Specific)
+- `tqdb_nyse` - NYSE market data
+- `tqdb_nasdaq` - NASDAQ market data
+- `tqdb_hkex` - Hong Kong Exchange
+- *One keyspace per exchange*
+
+### Tables
+- `minbar` - Minute bars (OHLCV)
+- `secbar` - Second bars
+- `tick` - Tick data
+- `sym` - Symbol metadata
+- `quote` - Latest quotes
+
+## 🎓 Documentation Flow
+
+```
+Start Here (README.md)
+    ↓
+Want to deploy? → DEPLOYMENT_GUIDE.md
+    ↓
+Need to operate? → OPERATIONS.md
+    ↓
+Legacy system? → docs/legacy/
 ```
 
-### 7. System Configuration
+## 🤝 Contributing
 
-#### Timezone Setup
-```bash
-# Check current timezone
-timedatectl status
+Private/enterprise project. See internal documentation.
 
-# Set timezone to UTC (or your preferred timezone)
-sudo timedatectl set-timezone UTC
-```
+## 📄 License
 
-#### Boot-time Configuration
+Apache License 2.0 - See [LICENSE](LICENSE)
 
-**Rocky 9 Modern Approach (Recommended):**
-```bash
-# 1. Set up environment profile (system-wide configuration)
-sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/profile_tqdb.sh /etc/profile.d/
+## 🆘 Support
 
-# 2. Create systemd-compatible environment file
-sudo cp /home/tqdb/codes/tqdb/script_for_sys/tqdb.env /etc/systemd/system/tqdb.env
+- **Deployment**: See DEPLOYMENT_GUIDE.md Troubleshooting
+- **Operations**: See OPERATIONS.md
+- **Legacy**: See docs/legacy/
 
-# 3. Create systemd service for TQDB (modern Rocky 9 approach)
-sudo tee /etc/systemd/system/tqdb.service > /dev/null << 'EOF'
-[Unit]
-Description=TQDB Time-series Quote Database Service
-Documentation=https://github.com/wldtw2008/tqdb
-After=network-online.target cassandra.service
-Wants=network-online.target
-Requires=cassandra.service
+## 🗺️ Roadmap
 
-[Service]
-Type=forking
-User=tqdb
-Group=tqdb
-Environment=HOME=/home/tqdb
-Environment=USER=tqdb
-EnvironmentFile=/etc/systemd/system/tqdb.env
-ExecStartPre=/bin/mkdir -p /tmp/TQAlert
-ExecStartPre=/bin/chmod 777 /tmp/TQAlert
-ExecStart=/home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh
-ExecReload=/bin/kill -HUP $MAINPID
-KillMode=mixed
-TimeoutStartSec=60
-TimeoutStopSec=30
-Restart=on-failure
-RestartSec=10
+### ✅ Completed
+- Legacy system on Rocky Linux 9
+- Two-phase deployment plan
+- Documentation consolidation
 
-# Security settings (Rocky 9 hardening)
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/tmp /var/log /home/tqdb
+### 🚧 Phase 1 (Next)
+- Single-node Docker setup
+- Multi-node cluster templates
+- Data migration scripts
+- Tool containerization
 
-[Install]
-WantedBy=multi-user.target
-EOF
+### 📅 Phase 2 (Future)
+- SvelteKit web UI
+- RESTful API
+- Modern query interface
 
-# 3. Enable and configure the service
-sudo systemctl daemon-reload
-sudo systemctl enable tqdb.service
+### 🔮 Beyond
+- ScyllaDB evaluation
+- Kubernetes deployment
+- Multi-datacenter
 
-# 4. Configure environment variables in the systemd environment file
-sudo nano /etc/systemd/system/tqdb.env
-# Update the following variables as needed:
-# - CASS_IP (Cassandra IP address)
-# - CASS_PORT (default: 9042)
-# - D2TQ_IP (Data source IP)
-# - D2TQ_PORT (Data source port)
-# - TQDB_DIR (TQDB installation directory)
+## 📈 Status
 
-# 5. Also configure shell environment (for manual script execution)
-sudo nano /etc/profile.d/profile_tqdb.sh
-# This file is used when running scripts manually or in shell sessions
+**Current**: Legacy system in production  
+**Active**: Phase 1 preparation  
+**Target**: Phase 1 (Q2 2026), Phase 2 (Q4 2026)
 
-# 5. Create systemd override for custom configuration (optional)
-sudo mkdir -p /etc/systemd/system/tqdb.service.d
-sudo tee /etc/systemd/system/tqdb.service.d/override.conf > /dev/null << 'EOF'
-[Service]
-# Add custom environment variables or override service settings here
-# Example:
-# Environment=CUSTOM_VAR=value
-EOF
+---
 
-# 6. Verify service configuration
-sudo systemctl daemon-reload
-sudo systemctl status tqdb.service
-
-# 7. Test the service (optional - for immediate testing)
-# sudo systemctl start tqdb.service
-# sudo systemctl status tqdb.service
-```
-
-**Environment File Configuration:**
-
-The systemd service uses two environment configuration approaches:
-
-1. **For systemd service** (`/etc/systemd/system/tqdb.env`): 
-   - Simple `KEY=VALUE` format without shell expansions
-   - Used by systemd when running the service
-
-2. **For shell sessions** (`/etc/profile.d/profile_tqdb.sh`):
-   - Standard bash script with exports and parameter expansions
-   - Used when running scripts manually or in shell sessions
-
-**To modify environment variables:**
-```bash
-# Edit systemd environment file
-sudo nano /etc/systemd/system/tqdb.env
-
-# Edit shell environment file  
-sudo nano /etc/profile.d/profile_tqdb.sh
-
-# Apply changes
-sudo systemctl daemon-reload
-sudo systemctl restart tqdb.service
-```
-
-**Legacy Compatibility (Fallback for older systems):**
-```bash
-# For systems that still require SysV init compatibility
-sudo ln -sf /home/tqdb/codes/tqdb/script_for_sys/tqdbStartup.sh /etc/init.d/tqdbStartup
-sudo chmod +x /etc/rc.d/rc.local
-echo '/etc/init.d/tqdbStartup' | sudo tee -a /etc/rc.d/rc.local
-
-# Enable rc.local service (disabled by default in Rocky 9)
-sudo systemctl enable rc-local
-```
-
-**Service Management Commands:**
-```bash
-# Start TQDB service
-sudo systemctl start tqdb.service
-
-# Stop TQDB service
-sudo systemctl stop tqdb.service
-
-# Restart TQDB service
-sudo systemctl restart tqdb.service
-
-# Check service status
-sudo systemctl status tqdb.service
-
-# View service logs
-sudo journalctl -u tqdb.service -f
-
-# Disable service (if needed)
-sudo systemctl disable tqdb.service
-```
-
-**Enhanced Systemd Scripts (Optional):**
-
-For better reliability, enhanced startup/stop scripts are available:
-
-```bash
-# Make enhanced scripts executable
-chmod +x /home/tqdb/codes/tqdb/script_for_sys/tqdbStartup_systemd.sh
-chmod +x /home/tqdb/codes/tqdb/script_for_sys/tqdbStop.sh
-
-# These scripts provide:
-# - Better error handling and logging
-# - Service dependency checking
-# - Graceful shutdown procedures
-# - Health monitoring capabilities
-```
-
-#### Additional Tools Installation
-```bash
-# Install ucspi-tcp and daemontools (build from source for Rocky 9)
-# Note: The old RPM packages may not be compatible with Rocky 9
-
-# Install daemontools from source
-cd /tmp
-wget http://cr.yp.to/daemontools/daemontools-0.76.tar.gz
-tar -xzf daemontools-0.76.tar.gz
-cd admin/daemontools-0.76
-sudo dnf install -y gcc make
-package/install
-
-# Install ucspi-tcp from source
-cd /tmp
-wget http://cr.yp.to/ucspi-tcp/ucspi-tcp-0.88.tar.gz
-tar -xzf ucspi-tcp-0.88.tar.gz
-cd ucspi-tcp-0.88
-make
-sudo make setup check
-
-# Alternative: Use the provided RPM files if they work
-# sudo rpm -ivh /home/tqdb/codes/tqdb/3rd/daemontools-0.76-1.el6.art.x86_64.rpm
-# sudo rpm -ivh /home/tqdb/codes/tqdb/3rd/ucspi-tcp-0.88-2.2.x86_64.rpm
-```
-
-#### Cron Job Configuration
-```bash
-# Edit system crontab
-sudo vi /etc/crontab
-```
-
-Add the following cron jobs:
-```cron
-# Build yesterday 1Min from Tick at every 2:15
-15 2    * * 1,2,3,4,5,6,7   root   cd /home/tqdb/codes/tqdb/tools && ./build1MinFromTick.sh ALL 0
-30 2    * * 1,2,3,4,5,6,7   root   cd /home/tqdb/codes/tqdb/tools && ./build1SecFromTick.sh @ALL_SSEC@ 0
-02 5    * * 7   root    cd /home/tqdb/codes/tqdb/tools && ./purgeTick.sh && reboot
-# Chrony time sync (replaced NTP)
-30 3    * * *   root    chrony sources -v
-# TimeZone database update
-0 12    1 * *   root    dnf update -y tzdata
-```
-
-### 8. Final Setup and Reboot
-
-```bash
-# Reboot to confirm automatic data reception from server
-sudo reboot
-```
-
-## System Verification
-
-### Post-Installation Checks
-
-#### 1. Verify Demo Data Service
-```bash
-# Check if demo server is running
-ps -ef | grep demo_d2tq_server.sh
-
-# Test demo data connection
-netcat 127.0.0.1 4568
-```
-
-#### 2. Verify Cassandra Data Insertion
-```bash
-# Check if auto-insertion service is running
-ps -ef | grep autoIns2Cass.sh
-
-# Check insertion logs
-cat /tmp/autoIns2Cass.log
-
-# Manual test of tick insertion
-stdbuf -i0 -o0 -e0 netcat $D2TQ_IP $D2TQ_PORT | $TQDB_DIR/tools/itick $CASS_IP $CASS_PORT tqdb1 0 0
-```
-
-### Troubleshooting
-
-#### Common systemd Environment Issues
-If you see errors like "Ignoring invalid environment assignment" in systemd logs:
-
-1. **Check environment file format:**
-   ```bash
-   # Verify systemd environment file uses simple KEY=VALUE format
-   cat /etc/systemd/system/tqdb.env
-   ```
-
-2. **Fix invalid environment file:**
-   ```bash
-   # Remove export statements and shell expansions from systemd env file
-   sudo sed -i 's/^export //g' /etc/systemd/system/tqdb.env
-   sudo sed -i 's/\${[^}]*:-\([^}]*\)}/\1/g' /etc/systemd/system/tqdb.env
-   ```
-
-3. **Reload and restart service:**
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl restart tqdb.service
-   sudo systemctl status tqdb.service
-   ```
-
-4. **Check service logs:**
-   ```bash
-   sudo journalctl -u tqdb.service -f
-   ```
-
-## Additional Resources
-
-### VirtualBox VM Download
-Pre-configured VirtualBox VM available at:
-- **Download Link:** https://drive.google.com/open?id=16ZawNAWJNDcGV2jGirviIWzd_EwXlNfe
-- **VM Credentials:**
-  - Username: `tqdb`
-  - Password: `tqdb@888`
-  - Root Password: `tqdb@888`
-- **Note:** This VM is based on CentOS 7. For Rocky 9, follow this updated guide instead.
-
-## Rocky 9 Specific Notes
-- **Package Manager:** Rocky 9 uses `dnf` instead of `yum` (though `yum` is aliased to `dnf`)
-- **Python:** Default Python is Python 3.9+ (use `python3` and `pip3` commands)
-- **Time Sync:** Uses `chronyd` instead of `ntpd` for time synchronization
-- **Java:** Recommended to use Java 11 or newer instead of Java 8
-- **Systemd:** Prefer systemd services over SysV init scripts
-- **Firewall:** `firewalld` is enabled by default and should be configured properly
-- **SELinux:** Enabled by default in enforcing mode (consider keeping it enabled for security)
-
-## Security Considerations for Production
-For production environments, consider:
-1. **Keep SELinux enabled** and configure appropriate policies
-2. **Configure firewalld** instead of disabling it completely
-3. **Use specific firewall rules** for required ports only
-4. **Regular security updates** with `dnf update`
-5. **Proper SSL/TLS certificates** for web services
-
-## Notes
-- Ensure all commands are executed as the `tqdb` user unless specified otherwise
-- The system must be rebooted after installation to confirm automatic data reception
-- Configuration files in `/etc/profile.d/profile_tqdb.sh` must be updated with correct IPs and ports
-- For Cassandra KeySpace and Table creation, refer to the Database Schema Setup section above
-- Some legacy RPM packages may need to be rebuilt or replaced for Rocky 9 compatibility
+**Version**: 2.0  
+**Last Updated**: February 17, 2026
