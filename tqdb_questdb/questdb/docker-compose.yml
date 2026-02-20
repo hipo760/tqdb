@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  questdb:
+    image: questdb/questdb:9.3.2
+    container_name: tqdb-questdb
+    hostname: questdb
+    
+    # Expose all QuestDB ports
+    ports:
+      - "9000:9000"   # HTTP - REST API and Web Console
+      - "9009:9009"   # InfluxDB line protocol (for ingestion)
+      - "8812:8812"   # Postgres wire protocol (for queries)
+      - "9003:9003"   # Min health server (for monitoring)
+    
+    # Environment variables for QuestDB configuration
+    environment:
+      # Enable HTTP and Postgres wire protocol
+      - QDB_HTTP_ENABLED=true
+      - QDB_PG_ENABLED=true
+      
+      # Performance tuning for 5-second updates
+      - QDB_CAIRO_MAX_UNCOMMITTED_ROWS=100000
+      - QDB_CAIRO_O3_MAX_LAG=60000000  # 60 seconds in microseconds
+      - QDB_CAIRO_COMMIT_LAG=10000000  # 10 seconds in microseconds
+      
+      # Optional: Configure resource limits
+      # - QDB_SHARED_WORKER_COUNT=2
+      # - QDB_HTTP_WORKER_COUNT=2
+      
+    # Mount volume for data persistence
+    volumes:
+      - questdb-data:/var/lib/questdb
+      # Optional: Mount custom configuration
+      # - ./conf:/var/lib/questdb/conf
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+# Named volume for QuestDB data persistence
+volumes:
+  questdb-data:
+    driver: local
