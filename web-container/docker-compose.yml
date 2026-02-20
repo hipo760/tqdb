@@ -1,0 +1,57 @@
+version: '3.8'
+
+# TQDB Web Container - Docker Compose Configuration
+# This compose file only manages the web interface container.
+# Cassandra is assumed to be running from another docker-compose file.
+
+services:
+  tqdb-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tqdb-web
+    hostname: tqdb-web
+    
+    # Environment variables for configuration
+    environment:
+      - CASSANDRA_HOST=cassandra-node
+      - CASSANDRA_PORT=9042
+      - CASSANDRA_KEYSPACE=tqdb1
+      - TOOLS_DIR=/opt/tqdb/tools
+      - TZ=UTC
+      - WAIT_FOR_CASSANDRA=true
+    
+    # Expose HTTP port
+    ports:
+      - "2380:80"
+    
+    # Connect to external network where Cassandra is running
+    networks:
+      - tqdb_network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+# Use external network created by Cassandra compose file
+networks:
+  tqdb_network:
+    external: true
+    name: cassandra_crypto_node_tqdb_network

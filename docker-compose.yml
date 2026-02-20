@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  cassandra:
+    image: cassandra:4.1.10
+    container_name: tqdb-cassandra
+    hostname: cassandra
+    environment:
+      - CASSANDRA_CLUSTER_NAME=tqdb_cluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_NUM_TOKENS=256
+      - MAX_HEAP_SIZE=2G
+      - HEAP_NEWSIZE=512M
+      - CASSANDRA_LISTEN_ADDRESS=auto
+    ports:
+      - "9042:9042"  # CQL native transport port
+      - "7199:7199"  # JMX monitoring port
+      - "9160:9160"  # Thrift client API (legacy)
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    networks:
+      - tqdb_network
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES;' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+volumes:
+  cassandra_data:
+    driver: local
+
+networks:
+  tqdb_network:
+    driver: bridge

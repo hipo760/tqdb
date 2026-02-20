@@ -1,0 +1,230 @@
+<html>
+<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />
+<link rel='stylesheet' type='text/css' href='/style.css'>
+<script src="/js/jquery-2.1.4.min.js"></script>
+<!--<script src="http://code.jquery.com/jquery-2.1.4.min.js"></script>-->
+<script language='javascript'>
+function myUrlEncode(str)
+{
+	return encodeURI(str).replace(/&/i, '%26')
+}
+function DoAjax(requestUrl, sentData, sHandler, eHandler, pageNotFoundHandler){
+        $.ajax({
+            type: 'GET',    
+            url: requestUrl,
+            cache: false,       
+            data: sentData, 
+            success: sHandler,   
+            error: eHandler,      
+            statusCode: {    
+              404: pageNotFoundHandler
+            }
+        });
+    };
+function qSymInfo()
+{
+    /*
+    makeMainTable([{"symbol":"A50","keyval":{"BPV":"1.000000","DESC":"A50%20Index"}},{"symbol":"CIF","keyval":{}},{"symbol":"ES","keyval":{}}])
+    return;
+    */
+    url='/cgi-bin/qsyminfo.py'
+    DoAjax(url, {symbol : "ALL"},
+        function(data, textStatus, jqXHR){
+		makeMainTable(data);
+        }); 
+}
+function qSystemInfo()
+{
+    url='/cgi-bin/qSystemInfo.py'
+    DoAjax(url, {},
+	function(data, textStatus, jqXHR){
+		html = ""
+		html += "<table><tr class='grayThing smallfont'><td>Item</td><td>Info</td></tr>"
+		for (i=0;i<data.length;++i)
+		{
+			k = data[i][0]
+			v = data[i][1].replace(/\t/g, '    ').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>')
+			html+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\">"
+			html+="<td><font size='-1'>" + k + "</font></td><td><font size='-1'>" + v + "</font></td></tr>"
+		}
+		html += "</table>"
+		$('#systemInfoDiv').html(html);
+	});
+
+}
+function doAddNewSym(sym){
+ if (sym.length==0)
+  return;
+ if (true==confirm('Are you sure add symbol: \''+sym+'\'?'))
+ {
+   location.href='/cgi-bin/usymbol.py?sym='+myUrlEncode(sym)+'&desc=&bpv=&mko=&mkc=&ssec=';
+ }
+}
+function doupdate(idx, sym, desc, bpv, mko, mkc, ssec){
+ //alert('ready to update: '+sym+', desc:'+desc+', bpv:'+bpv)
+ location.href='/cgi-bin/usymbol.py?sym='+myUrlEncode(sym)+'&desc='+desc+'&bpv='+bpv+'&mko='+mko+'&mkc='+mkc+
+               '&ssec='+ssec;
+}
+function doimport1min(idx, sym){
+ location.href='/i1min.html?sym='+myUrlEncode(sym);
+}
+function doModify(idx, sym){
+ window.open('/edata.html?sym='+escape(sym)+'&_T=0', "_blank", "");
+}
+
+function strQDay(datetime){
+    var dd = datetime.getDate();
+    var mm = datetime.getMonth()+1; //January is 0!
+    var yyyy = datetime.getFullYear();
+    return yyyy+"-"+mm+"-"+dd
+}
+function doq1min(idx, sym){
+    var begday = new Date();
+    begday.setDate(begday.getDate() - 3);
+    var endday = new Date(); 
+    endday.setDate(endday.getDate() + 3);
+    beg = strQDay(begday) 
+    end = strQDay(endday)
+    window.open('/cgi-bin/q1min.py?symbol='+myUrlEncode(sym)+'&BEG='+beg+"&END="+end, "_blank", "");
+}
+function doq1sec(idx, sym){
+    var begday = new Date();
+    begday.setDate(begday.getDate() - 3);
+    var endday = new Date();
+    endday.setDate(endday.getDate() + 3);
+    beg = strQDay(begday)
+    end = strQDay(endday)
+    window.open('/cgi-bin/q1sec.py?symbol='+myUrlEncode(sym)+'&BEG='+beg+"&END="+end, "_blank", "");
+}
+function dosummery(idx, sym){
+    window.open('/symsummery.html?symbol='+myUrlEncode(sym), "_blank", "");
+}
+function showDlg(idx){
+    var sym = allSymInfo[idx]
+    $('#dlgSym').html(sym['symbol'])
+    $('#dlgSymIdx').html(idx)
+    
+    // Check if keyval exists and has data
+    if (!sym['keyval']) {
+        sym['keyval'] = {};
+    }
+    
+    desc=sym['keyval']['DESC'] || ''
+    try{
+        if (desc.length !=0)
+            desc=decodeURI(desc)
+    }catch(e){}
+    $('#editDesc').val(desc)
+    $('#editBPV').val(sym['keyval']['BPV'] || '')
+    $('#editMKO').val(sym['keyval']['MKO'] || '')
+    $('#editMKC').val(sym['keyval']['MKC'] || '')
+    $('#chkSSec').prop("checked", (1 == sym['keyval']['SSEC']?true:false))
+
+    $('#myModal').show();
+}
+function close_myModal(){
+    $('#myModal').hide();
+}
+function close_newSymModal(){
+    $('#newSymModal').hide();
+}
+allSymInfo=[]
+function makeMainTable(jsonObj)
+{
+    allSymInfo = jsonObj;
+    //ex:
+    //allsymbol = [{"symbol": "WTX", "keyval": {"MKO": "84500", "DESC": "Taifex", "MKC": "134500", "BPV": "200"}}]
+    len = allSymInfo.length
+    strTable="<table>"
+    strTable+="<tr class='grayThing smallfont'><td rowspan=2>#</td><td rowspan=2>Symbol&nbsp;<input type='button' value='New' onclick='$(\"#newSymModal\").show();'/></td><td colspan=6>Symbol Settings</td></tr>"
+    strTable+="<tr class='grayThing smallfont'><td>Desc.</td><td>BigPoint<br>Value</td><td>MarketOpen<br>(HHmmSS)</td><td>MarketClose<br>(HHmmSS)</td><td>Store<br>Sec</td></tr>"
+    
+    for (i=0;i<len;++i)
+    {
+        symbol=allSymInfo[i]['symbol']
+        bpv=''
+        desc=''
+        mko=''
+        mkc=''
+        storesec_checked=''
+        if ('keyval' in allSymInfo[i])
+        {
+            if ('BPV' in allSymInfo[i]['keyval']) bpv = allSymInfo[i]['keyval']['BPV'];
+            if ('DESC' in allSymInfo[i]['keyval']) desc = allSymInfo[i]['keyval']['DESC'];
+            if ('MKO' in allSymInfo[i]['keyval']) mko = allSymInfo[i]['keyval']['MKO'];
+            if ('MKC' in allSymInfo[i]['keyval']) mkc = allSymInfo[i]['keyval']['MKC'];
+            if ('SSEC' in allSymInfo[i]['keyval'] && 1 == allSymInfo[i]['keyval']['SSEC'])
+                storesec_checked = 'Yes';
+            try{desc=decodeURI(desc)}catch(e){}
+        }
+        strTable+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\" onclick=\"showDlg("+i+");\" >"
+        strTable+="<td>"+(i+1)+"</td>"
+        strTable+="<td>"+symbol+"</td>"
+        strTable+="<td>"+desc+"</td>"
+        strTable+="<td>"+bpv+"</td>"
+        strTable+="<td>"+mko+"</td>"
+        strTable+="<td>"+mkc+"</td>"
+        strTable+="<td>"+storesec_checked+"</td>"
+        strTable+="</tr>"
+    }
+    strTable+="</table>"
+    document.getElementById('symbolTableDiv').innerHTML = strTable;
+}
+function divChange(divId)
+{
+    $('#symbolTableDiv').hide();
+    $('#systemInfoDiv').hide();
+    $('#'+divId).show();
+}
+</script>
+<body onload='qSymInfo();qSystemInfo();'>
+<button type='button' value='' onclick='divChange("systemInfoDiv")'>System Info</button>
+<button type='button' value='' onclick='divChange("symbolTableDiv")'>All Symbols</button>
+<button type='button' value='' onclick='window.open("/tqalert.html", "_blank", "");'>No Tick Quote Alert</button>
+<hr>
+<div id='systemInfoDiv'>Loading...</div>
+<div id='symbolTableDiv' style="display: none;"></div>
+<div id="newSymModal" class='modal' style="display: none;">
+  <!-- Modal content -->
+  <div class="modal-content">
+    <span class="close" onclick="close_newSymModal();">x</span>
+    <p>
+                <table>
+                <tr class='grayThing smallfont'><td colspan=2>Add a new symbol</td></tr>
+                <tr><td>Symbol</td><td><input type='text' id='editNewSymbol'></td></tr>
+                <tr><td>Actions</td><td><button type='button' onclick="doAddNewSym($('#editNewSymbol').val())">Add</button></td></tr>
+		</table>
+  </div>
+</div>
+<!-- The Modal -->
+<div id="myModal" class='modal' style="display: none;">
+  <!-- Modal content -->
+  <div class="modal-content">
+    <span class="close" onclick="close_myModal();">x</span>
+    <p>
+		<table>
+		<tr class='grayThing smallfont'><td colspan=2>Symbol Setting</td></tr>
+		<tr><td>Symbol</td><td><div id='dlgSym'></div><div id='dlgSymIdx' style="display: none;"></div></td></tr>
+		<tr><td>Description</td><td><input type='text' id='editDesc'></td></tr>
+		<tr><td>Big Point Value</td><td><input type='text' id='editBPV'></td></tr>
+		<tr><td>Market Open/Close<br>(HHmmSS)</td><td><input type='text' id='editMKO'>&nbsp;~&nbsp;<input type='text' id='editMKC'></td></tr>
+		<tr><td>Store Second</td><td><input type='checkbox' id='chkSSec'"/></td></tr>
+		<tr><td>Actions</td><td><button type='button' value='' onclick="doupdate($('#dlgSymIdx').text()*1, $('#dlgSym').text(), $('#editDesc').val(), $('#editBPV').val(), $('#editMKO').val(), $('#editMKC').val(), $('#chkSSec').prop('checked')?1:0)">Update</button></td>
+		<table><br>
+
+		<table>
+                <tr class='grayThing smallfont'><td colspan=2>Actions</td></tr>
+		<tr><td>Qurey</td><td>
+			<button type='button' value='' onclick="dosummery($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Summery</button>&nbsp;
+			<button type='button' value='' onclick="doq1min($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Query 1Min</button>&nbsp;
+			<button type='button' value='' onclick="doq1sec($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Query 1Sec</button>&nbsp;
+		</td>
+		<tr><td>Modify</td><td>
+			<button type='button' value='' onclick="doimport1min($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Import 1Min</button>&nbsp;
+                        <button type='button' value='' onclick="doModify($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Modify Data</button>&nbsp;<br>
+		</td></tr>
+		</table>
+    </p>
+  </div>
+</div>
+</body></html>

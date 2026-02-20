@@ -1,0 +1,185 @@
+version: '3.8'
+
+# Multi-node Cassandra cluster for TQDB
+# Master node stores all exchange data
+# Exchange-specific nodes store only their market data
+
+services:
+  # Master Node - stores ALL exchange data
+  cassandra-master:
+    image: cassandra:4.1.10
+    container_name: tqdb-cassandra-master
+    hostname: cassandra-master
+    environment:
+      - CASSANDRA_CLUSTER_NAME=tqdb_cluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_NUM_TOKENS=256
+      - CASSANDRA_SEEDS=cassandra-master
+      - CASSANDRA_LISTEN_ADDRESS=auto
+      - MAX_HEAP_SIZE=4G
+      - HEAP_NEWSIZE=800M
+    ports:
+      - "9042:9042"  # CQL native transport
+      - "7199:7199"  # JMX
+    volumes:
+      - cassandra_master_data:/var/lib/cassandra
+      - ./cluster-init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      tqdb_network:
+        ipv4_address: 172.20.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES;' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # NYSE Exchange Node
+  cassandra-nyse:
+    image: cassandra:4.1.10
+    container_name: tqdb-cassandra-nyse
+    hostname: cassandra-nyse
+    environment:
+      - CASSANDRA_CLUSTER_NAME=tqdb_cluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack2
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_NUM_TOKENS=256
+      - CASSANDRA_SEEDS=cassandra-master
+      - CASSANDRA_LISTEN_ADDRESS=auto
+      - MAX_HEAP_SIZE=2G
+      - HEAP_NEWSIZE=512M
+    ports:
+      - "9043:9042"  # CQL native transport (mapped to different host port)
+      - "7200:7199"  # JMX
+    volumes:
+      - cassandra_nyse_data:/var/lib/cassandra
+    networks:
+      tqdb_network:
+        ipv4_address: 172.20.0.11
+    depends_on:
+      cassandra-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES;' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # NASDAQ Exchange Node
+  cassandra-nasdaq:
+    image: cassandra:4.1.10
+    container_name: tqdb-cassandra-nasdaq
+    hostname: cassandra-nasdaq
+    environment:
+      - CASSANDRA_CLUSTER_NAME=tqdb_cluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack3
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_NUM_TOKENS=256
+      - CASSANDRA_SEEDS=cassandra-master
+      - CASSANDRA_LISTEN_ADDRESS=auto
+      - MAX_HEAP_SIZE=2G
+      - HEAP_NEWSIZE=512M
+    ports:
+      - "9044:9042"  # CQL native transport
+      - "7201:7199"  # JMX
+    volumes:
+      - cassandra_nasdaq_data:/var/lib/cassandra
+    networks:
+      tqdb_network:
+        ipv4_address: 172.20.0.12
+    depends_on:
+      cassandra-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES;' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # HKEX Exchange Node
+  cassandra-hkex:
+    image: cassandra:4.1.10
+    container_name: tqdb-cassandra-hkex
+    hostname: cassandra-hkex
+    environment:
+      - CASSANDRA_CLUSTER_NAME=tqdb_cluster
+      - CASSANDRA_DC=dc1
+      - CASSANDRA_RACK=rack4
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_NUM_TOKENS=256
+      - CASSANDRA_SEEDS=cassandra-master
+      - CASSANDRA_LISTEN_ADDRESS=auto
+      - MAX_HEAP_SIZE=2G
+      - HEAP_NEWSIZE=512M
+    ports:
+      - "9045:9042"  # CQL native transport
+      - "7202:7199"  # JMX
+    volumes:
+      - cassandra_hkex_data:/var/lib/cassandra
+    networks:
+      tqdb_network:
+        ipv4_address: 172.20.0.13
+    depends_on:
+      cassandra-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES;' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+volumes:
+  cassandra_master_data:
+    driver: local
+  cassandra_nyse_data:
+    driver: local
+  cassandra_nasdaq_data:
+    driver: local
+  cassandra_hkex_data:
+    driver: local
+
+networks:
+  tqdb_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

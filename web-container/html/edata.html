@@ -1,0 +1,269 @@
+<html>
+<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />
+<link rel='stylesheet' type='text/css' href='/style.css'>
+<link rel='stylesheet' type='text/css' href="/jquery-ui.css">
+<script src="/js/jquery-2.1.4.min.js"></script>
+<script type="text/javascript" src="/js/jquery-ui.min.js"></script>
+<link href='/jquery-ui-timepicker-addon.css' rel='stylesheet'>
+<script src="/js/jquery-ui-timepicker-addon.js"></script>
+<script src="/js/jquery-ui-sliderAccess.js"></script>
+
+
+
+<!--<script src="http://code.jquery.com/jquery-2.1.4.min.js"></script>-->
+<script language='javascript'>
+function myUrlEncode(str)
+{
+	 return encodeURI(str).replace(/&/i, '%26')
+}
+
+function DoAjax(requestUrl, sentData, sHandler, eHandler, pageNotFoundHandler){
+        $.ajax({
+            type: 'GET',    
+            url: requestUrl,
+            cache: false,       
+            data: sentData, 
+            success: sHandler,   
+            error: eHandler,      
+            statusCode: {    
+              404: pageNotFoundHandler
+            }
+        });
+    };
+function qRange()
+{
+    cleanBarData();
+    $('#mainDiv').html("Querying...")
+
+    editSym = $('#editSym').val()
+    selectType = $('#selectType').val()
+    editBeg = $('#editBeg').val()
+    editEnd = $('#editEnd').val() 
+
+    url='/cgi-bin/qRange.py?symbol='+myUrlEncode(editSym)+'&type='+selectType+'&BEG='+editBeg+'&END='+editEnd
+    DoAjax(url, {},
+        function(data, textStatus, jqXHR){
+		makeMainTable(data);
+        }); 
+}
+function getSymbol(symbol)
+{
+    var elem = document.createElement('textarea')
+    elem.innerHTML = symbol
+    return elem.value;
+}
+function getLocalDatetimeStr(epochFloat)
+{
+    var d = new Date(0);
+    d.setUTCMilliseconds(epochFloat*1000)
+    dtstr = d.getFullYear() + "-" + ("00" + (d.getMonth() + 1)).slice(-2) + "-" + ("00" + d.getDate()).slice(-2) + " " +
+            ("00" + d.getHours()).slice(-2) + ":" + ("00" + d.getMinutes()).slice(-2) + ":" + ("00" + d.getSeconds()).slice(-2) + "." + (d.getMilliseconds()+"000").substr(0,3)
+    return dtstr
+}
+function doDelRange(){
+    symbol = getSymbol(barData['symbol']);
+    barType = barData['type']
+    strMsg = "Are you sure delete " + barData.data.length + " record(s) '" + barType + "' of '" + symbol + "' between\n"
+    strMsg += getLocalDatetimeStr(barData['range'][0]) + " ~ " +getLocalDatetimeStr(barData['range'][1]) + "?\n"
+    r = confirm(strMsg)
+    if (r == true)
+    {
+        epochFloatBeg = barData['range'][0]
+	epochFloatEnd = barData['range'][1]
+	$('#modifyResult').html('Procssing...');
+	url='/cgi-bin/eData.py?symbol='+myUrlEncode(symbol)+'&type='+barType+'&cmd=DELETERANGE&epochFloatBeg='+epochFloatBeg+'&epochFloatEnd='+epochFloatEnd+'&jsonObj={}'
+	DoAjax(url, {},
+	       function(data, textStatus, jqXHR){
+		     $('#mainDiv').html(data['Result'])
+		     setTimeout("closeModifyBarDlg();qRange();",1000);
+	       })
+    }
+}
+function doModify(method){
+    $('#modifyResult').html('Procssing...');
+    floatDT = parseFloat($('#modifyFloatDT').text())
+    symbol = getSymbol(barData['symbol']);
+    barType = barData['type'] 
+    o=$('#barOpen').val();
+    h=$('#barHigh').val();
+    l=$('#barLow').val();
+    c=$('#barClose').val();
+    v=$('#barVol').val();
+    var jsonObj = {}
+    if (method == "UPDATE") 
+    {
+        if (barType == "tick")
+        {
+		jsonObj={'C':c,'V':v}
+        }
+	else
+	{
+		jsonObj={'open':o,'high':h,'low':l,'close':c,'vol':v}		
+	}
+    }
+    else
+    {
+	    jsonObj = {}
+    }
+    url='/cgi-bin/eData.py?symbol='+myUrlEncode(symbol)+'&type='+barType+'&cmd='+method+'&epochFloatBeg='+floatDT+'&jsonObj='+JSON.stringify(jsonObj)
+    DoAjax(url, {},
+            function(data, textStatus, jqXHR){
+	       html = "<font color='#000'>"+data['Result']+"</font>";
+	       if (data['Result'] != 'OK')
+		   html = "<font color='#F00'>"+data['Result']+"</font>";
+               $('#modifyResult').html(html);
+	       if (data['Result'] == 'OK'){
+		       setTimeout("closeModifyBarDlg();qRange();",1000);
+  	       }
+            });
+
+}
+function showModifyBarDlg(floatDT){
+    floatDT = parseFloat(floatDT);
+    $('#barSym').html(barData['symbol'])
+    $('#barType').html(barData['type'])
+    $('#modifyFloatDT').text(floatDT)
+    barIdx = barData['dataDict'][floatDT]
+    bar = barData['data'][barIdx]
+
+    dtstr = getLocalDatetimeStr(floatDT)
+    $('#barDT').html(dtstr)
+    barOHL_disable=false
+    if (barData['type'] == 'minbar' || barData['type'] == 'secbar')
+    {   
+        barOHL_disable=false
+        $('#barOpen').val(bar['o'])
+        $('#barHigh').val(bar['h'])
+        $('#barLow').val(bar['l'])
+    }
+    else
+    {
+        barOHL_disable=true;
+        $('#barOpen').val('N/A')
+        $('#barHigh').val('N/A')
+        $('#barLow').val('N/A')
+
+    }
+    $('#barOpen').prop('disabled', barOHL_disable);
+    $('#barHigh').prop('disabled', barOHL_disable);
+    $('#barLow').prop('disabled', barOHL_disable);
+
+    $('#barClose').val(bar['c'])
+    $('#barVol').val(bar['v'])
+    var modal = document.getElementById('modifyBar');
+    modal.style.display = "block";
+}
+function closeModifyBarDlg(){
+    var modal = document.getElementById('modifyBar');
+    modal.style.display = "none";
+}
+barData = {'range':null, 'symbol':'', 'type':'', 'data':[], 'dataDict':{}}
+function cleanBarData()
+{
+    barData = {'range':null, 'symbol':'', 'type':'', 'data':[], 'dataDict':{}}
+}
+function makeMainTable(jsonObj)
+{
+    barData = jsonObj;
+    barData['dataDict']={}
+
+    range = barData['range']
+    bars = barData['data']
+    len = bars.length;
+    if (len<=0)
+    {
+        $('#mainDiv').html("===No Data===")
+        return;
+    }
+    strDeleteRange = "<input type='button' value='Delete all' onclick='doDelRange()'><br><br>"
+    strTable="<table>"
+    strTable+="<tr class='grayThing smallfont'><td>Timestamp</td><td>Datetime(LocalTime)</td><td>Open</td><td>High</td><td>Low</td><td>Close</td><td>Vol</td></tr>"
+    
+    for (idx=0;idx<len;++idx)
+    {
+        bar = bars[idx]
+        floatDT = parseFloat(bar['dt']);
+        barData['dataDict'][floatDT] = idx;        
+        var d = new Date(0);
+	d.setUTCMilliseconds(floatDT*1000)
+        dtstr = d.getFullYear() + "-" + ("00" + (d.getMonth() + 1)).slice(-2) + "-" + ("00" + d.getDate()).slice(-2) + " " + 
+               ("00" + d.getHours()).slice(-2) + ":" + ("00" + d.getMinutes()).slice(-2) + ":" + ("00" + d.getSeconds()).slice(-2) + "." + (d.getMilliseconds()+"000").substr(0,3) 
+        o='N/A';
+        h='N/A';
+        l='N/A';
+        c=bar['c'];
+        v=bar['v'];
+        if (barData['type'] == 'minbar' || barData['type'] == 'secbar')
+        {
+            o=bar['o'];h=bar['h'];l=bar['l'];
+        }
+        strTable+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\" onclick=\"showModifyBarDlg("+floatDT+");\" >"
+        strTable+="<td>"+floatDT.toFixed(3)+"</td>"
+        strTable+="<td>"+dtstr+"</td>"
+        strTable+="<td>"+o+"</td>"
+        strTable+="<td>"+h+"</td>"
+        strTable+="<td>"+l+"</td>"
+        strTable+="<td>"+c+"</td>"
+        strTable+="<td>"+v+"</td>"
+        strTable+="</tr>"
+    }
+    strTable+="</table>"
+    document.getElementById('mainDiv').innerHTML = strDeleteRange+strTable;
+}
+function getParameterByName(name, url) {
+	    if (!url) {
+		          url = window.location.href;
+			      }
+	        name = name.replace(/[\[\]]/g, "\\$&");
+		    var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
+		        results = regex.exec(url);
+		        if (!results) return null;
+			    if (!results[2]) return '';
+			        return decodeURIComponent(results[2].replace(/\+/g, " "));
+}
+function bodyonload()
+{
+    $('#editSym').val(unescape(getParameterByName('sym')));
+    $('#editBeg').datetimepicker({dateFormat: 'yy-mm-dd',format:'HH:mm:ss', value: new Date()});
+    $('#editEnd').datetimepicker({dateFormat: 'yy-mm-dd',format:'HH:mm:ss', value: new Date()});
+}
+</script>
+<body onload='bodyonload();'>
+<!-- The Modal -->
+<div id='inputDiv'>
+Symbol:<input type='text' id='editSym' size=10>&nbsp;
+Type:<select id='selectType'><option value="minbar" selected>1 Minute Bar</option><option value="secbar">1 Second Bar</option><option value="tick">Tick</option></select>&nbsp;
+Range:<input type='text' id='editBeg' size=14>&nbsp;~&nbsp;<input type='text' id='editEnd' size=14>&nbsp;(ServerTime)<br>
+<table class='tblnoborder'><tr class='tblnoborder smallfont'><td class='tblnoborder'>
+<input type='button' value='Query' onclick='qRange()'></td><td class='tblnoborder'>
+1. MinBar and SecBar is builded from Tick at overnight scheduling.<br>
+2. Maximum showing 20000 recoerds.</td></tr></table>
+<hr>
+</div>
+<div id='mainDiv' ></div>
+<div id="modifyBar" class='modal'>
+  <!-- Modal content -->
+  <div class="modal-content">
+    <span class="close" onclick="closeModifyBarDlg();">x</span>
+    <p>
+    <span>Symbol:&nbsp;<span id='barSym'></span>&nbsp;&nbsp;&nbsp;Type:&nbsp;<span id='barType'></span></span>
+                <input type='text' id='modifyFloatDT' style="display: none;">
+		<table>
+		<tr class='grayThing smallfont'><td>Datetime</td><td>Open</td><td>High</td><td>Low</td><td>Close</td><td>Volume</td></tr>
+                <tr><td><div id='barDT'></div></td>
+                    <td><input type='text' id='barOpen' size='6'></td>
+		    <td><input type='text' id='barHigh' size='6'></td>
+		    <td><input type='text' id='barLow' size='6'></td>
+		    <td><input type='text' id='barClose' size='6'></td>
+                    <td><input type='text' id='barVol' size='6'></td>
+		</tr>
+                <tr><td colspan='6'>
+			<button type='button' value='' onclick="doModify('UPDATE')">Update</button>&nbsp;
+			<button type='button' value='' onclick="doModify('DELETE')">Delete</button>&nbsp;
+		</td>
+		</table>
+    </p>
+    <div id='modifyResult' >Result: </div>
+  </div>
+</div>
+</body></html>
