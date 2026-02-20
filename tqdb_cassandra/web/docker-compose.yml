@@ -20,6 +20,13 @@ services:
       - TOOLS_DIR=/opt/tqdb/tools
       - TZ=UTC
       - WAIT_FOR_CASSANDRA=true
+      - TQDB_ENDPOINT_LOGGING=true
+      - TQDB_LOG_DIR=/var/log/apache2
+    
+    # Volumes for persistent data
+    volumes:
+      # Persist endpoint usage logs
+      - ./logs:/var/log/apache2
     
     # Expose HTTP port
     ports:

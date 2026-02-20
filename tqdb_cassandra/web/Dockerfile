@@ -67,7 +67,9 @@ ENV CASSANDRA_HOST=cassandra-node \
     CASSANDRA_KEYSPACE=tqdb1 \
     TOOLS_DIR=/opt/tqdb/tools \
     PYTHONUNBUFFERED=1 \
-    TZ=UTC
+    TZ=UTC \
+    TQDB_ENDPOINT_LOGGING=true \
+    TQDB_LOG_DIR=/var/log/apache2
 
 # Configure timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
@@ -80,6 +82,11 @@ RUN chown -R www-data:www-data /var/www/ && \
 # Create temporary directory for query results
 RUN mkdir -p /tmp/tqdb && \
     chown www-data:www-data /tmp/tqdb
+
+# Ensure log directory exists and is writable for endpoint logging
+RUN mkdir -p /var/log/apache2 && \
+    chown -R www-data:www-data /var/log/apache2 && \
+    chmod 775 /var/log/apache2
 
 # Expose HTTP port
 EXPOSE 80

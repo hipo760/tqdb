@@ -1,0 +1,29 @@
+# Endpoint usage logs (created by endpoint_logger.py)
+logs/
+*.log
+*.jsonl
+
+# Docker volumes
+volumes/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
