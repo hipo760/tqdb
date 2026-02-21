@@ -43,7 +43,16 @@ function qRange()
     url='/cgi-bin/qRange.py?symbol='+myUrlEncode(editSym)+'&type='+selectType+'&BEG='+editBeg+'&END='+editEnd
     DoAjax(url, {},
         function(data, textStatus, jqXHR){
-		makeMainTable(data);
+            // Check if there's an error in the response
+            if (data && data.error) {
+                $('#mainDiv').html("<font color='red'>Error: " + data.error + "</font>");
+            } else {
+                makeMainTable(data);
+            }
+        },
+        function(jqXHR, textStatus, errorThrown){
+            // Handle AJAX errors
+            $('#mainDiv').html("<font color='red'>Query failed: " + textStatus + " - " + errorThrown + "</font>");
         }); 
 }
 function getSymbol(symbol)

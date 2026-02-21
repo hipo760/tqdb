@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 RUN pip install --no-cache-dir \
-    cassandra-driver==3.28.0
+    cassandra-driver==3.28.0 \
+    python-dateutil
 
 # Enable Apache CGI module
 RUN a2enmod cgi && \

@@ -68,15 +68,6 @@ function doq1min(idx, sym){
     end = strQDay(endday)
     window.open('/cgi-bin/q1min.py?symbol='+myUrlEncode(sym)+'&BEG='+beg+"&END="+end, "_blank", "");
 }
-function doq1sec(idx, sym){
-    var begday = new Date();
-    begday.setDate(begday.getDate() - 3);
-    var endday = new Date();
-    endday.setDate(endday.getDate() + 3);
-    beg = strQDay(begday)
-    end = strQDay(endday)
-    window.open('/cgi-bin/q1sec.py?symbol='+myUrlEncode(sym)+'&BEG='+beg+"&END="+end, "_blank", "");
-}
 function dosummery(idx, sym){
     window.open('/symsummery.html?symbol='+myUrlEncode(sym), "_blank", "");
 }
@@ -188,7 +179,6 @@ function makeMainTable(jsonObj)
 		<tr><td>Qurey</td><td>
 			<button type='button' value='' onclick="dosummery($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Summery</button>&nbsp;
 			<button type='button' value='' onclick="doq1min($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Query 1Min</button>&nbsp;
-			<button type='button' value='' onclick="doq1sec($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Query 1Sec</button>&nbsp;
 		</td>
 		<tr><td>Modify</td><td>
 			<button type='button' value='' onclick="doimport1min($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Import 1Min</button>&nbsp;
