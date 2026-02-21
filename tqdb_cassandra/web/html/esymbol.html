@@ -33,25 +33,6 @@ function qSymInfo()
 		makeMainTable(data);
         }); 
 }
-function qSystemInfo()
-{
-    url='/cgi-bin/qSystemInfo.py'
-    DoAjax(url, {},
-	function(data, textStatus, jqXHR){
-		html = ""
-		html += "<table><tr class='grayThing smallfont'><td>Item</td><td>Info</td></tr>"
-		for (i=0;i<data.length;++i)
-		{
-			k = data[i][0]
-			v = data[i][1].replace(/\t/g, '    ').replace(/ /g, '&nbsp;').replace(/\n/g, '<br>')
-			html+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\">"
-			html+="<td><font size='-1'>" + k + "</font></td><td><font size='-1'>" + v + "</font></td></tr>"
-		}
-		html += "</table>"
-		$('#systemInfoDiv').html(html);
-	});
-
-}
 function doAddNewSym(sym){
  if (sym.length==0)
   return;
@@ -170,20 +151,10 @@ function makeMainTable(jsonObj)
     strTable+="</table>"
     document.getElementById('symbolTableDiv').innerHTML = strTable;
 }
-function divChange(divId)
-{
-    $('#symbolTableDiv').hide();
-    $('#systemInfoDiv').hide();
-    $('#'+divId).show();
-}
 </script>
-<body onload='qSymInfo();qSystemInfo();'>
-<button type='button' value='' onclick='divChange("systemInfoDiv")'>System Info</button>
-<button type='button' value='' onclick='divChange("symbolTableDiv")'>All Symbols</button>
-<button type='button' value='' onclick='window.open("/tqalert.html", "_blank", "");'>No Tick Quote Alert</button>
+<body onload='qSymInfo();'>
 <hr>
-<div id='systemInfoDiv'>Loading...</div>
-<div id='symbolTableDiv' style="display: none;"></div>
+<div id='symbolTableDiv'></div>
 <div id="newSymModal" class='modal' style="display: none;">
   <!-- Modal content -->
   <div class="modal-content">
