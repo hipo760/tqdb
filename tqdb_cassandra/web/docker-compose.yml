@@ -14,7 +14,7 @@ services:
     
     # Environment variables for configuration
     environment:
-      - CASSANDRA_HOST=cassandra-node
+      - CASSANDRA_HOST=cassandra
       - CASSANDRA_PORT=9042
       - CASSANDRA_KEYSPACE=tqdb1
       - TOOLS_DIR=/opt/tqdb/tools
@@ -57,8 +57,8 @@ services:
           cpus: '0.5'
           memory: 256M
 
-# Use external network created by Cassandra compose file
+# Use network created by Cassandra compose file
 networks:
   tqdb_network:
     external: true
-    name: cassandra_crypto_node_tqdb_network
+    name: cassandra_tqdb_network
