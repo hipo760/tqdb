@@ -1,9 +1,3 @@
-version: '3.8'
-
-# TQDB Web Container - Docker Compose Configuration
-# This compose file only manages the web interface container.
-# Cassandra is assumed to be running from another docker-compose file.
-
 services:
   tqdb-web:
     build:

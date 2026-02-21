@@ -260,10 +260,7 @@ def output_response_data(tmp_file, symbol, file_type, gzip_enabled, remove_file)
         sys.stdout.write("\r\n")
         sys.stdout.flush()
         
-        # Add CSV header if CSV format and not gzipped
-        if file_type == FILE_TYPE_CSV and gzip_enabled == 0:
-            sys.stdout.write("YYYYMMDD,HHMMSS,Open,High,Low,Close,Vol\r\n")
-            sys.stdout.flush()
+        # Don't add CSV header - only data should be returned
         
         # Stream file contents
         with open(actual_file, 'rb') as fp:

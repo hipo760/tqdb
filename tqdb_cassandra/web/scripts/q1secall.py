@@ -140,13 +140,13 @@ def write_output(results, output_file, use_gzip):
     Format:
         CSV with header: datetime,open,high,low,close,volume
     """
+    # Add .gz extension if gzip is enabled
+    actual_file = f"{output_file}.gz" if use_gzip else output_file
     open_func = gzip.open if use_gzip else open
     mode = 'wt' if use_gzip else 'w'
     
-    with open_func(output_file, mode) as f:
-        # Write header
-        f.write("datetime,open,high,low,close,volume\n")
-        
+    with open_func(actual_file, mode) as f:
+        # Don't write header - only data rows
         # Write data rows
         for dt, open_price, high, low, close, vol in results:
             # Format datetime as string
@@ -182,14 +182,14 @@ def main():
             raise ValueError(f"Begin datetime {begin_dt_str} is after end datetime {end_dt_str}")
         
         # Query data
-        print(f"Querying second bars for {symbol} from {begin_dt_str} to {end_dt_str}...")
+        print(f"Querying second bars for {symbol} from {begin_dt_str} to {end_dt_str}...", file=sys.stderr)
         results = query_second_bars(cassandra_ip, port, keyspace, symbol, begin_dt, end_dt)
         
         # Write output
-        print(f"Writing {len(results)} second bars to {output_file}...")
+        print(f"Writing {len(results)} second bars to {output_file}...", file=sys.stderr)
         write_output(results, output_file, use_gzip)
         
-        print(f"Success! Retrieved {len(results)} second bars")
+        print(f"Success! Retrieved {len(results)} second bars", file=sys.stderr)
         
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
