@@ -8,8 +8,8 @@ services:
     hostname: cassandra
     environment:
       - CASSANDRA_CLUSTER_NAME=tqdb_single_node
-      - MAX_HEAP_SIZE=1536M
-      - HEAP_NEWSIZE=400M
+      - MAX_HEAP_SIZE=1024M
+      - HEAP_NEWSIZE=256M
       - CASSANDRA_AUTHENTICATOR=PasswordAuthenticator
       - CASSANDRA_AUTHORIZER=CassandraAuthorizer
       - CASSANDRA_USER=tqdb
@@ -33,10 +33,10 @@ services:
       resources:
         limits:
           cpus: '2'
-          memory: 2G
+          memory: 4G
         reservations:
           cpus: '1'
-          memory: 1G
+          memory: 2G
 
 networks:
   tqdb_network:
