@@ -37,7 +37,12 @@ def connect_cassandra(cassandra_ip, port):
     """Connect to Cassandra cluster."""
     try:
         port = int(port)
-        cluster = Cluster([cassandra_ip], port=port)
+        cassandra_user = os.environ.get('CASSANDRA_USER', '')
+        cassandra_password = os.environ.get('CASSANDRA_PASSWORD', '')
+        auth_provider = None
+        if cassandra_user and cassandra_password:
+            auth_provider = PlainTextAuthProvider(username=cassandra_user, password=cassandra_password)
+        cluster = Cluster([cassandra_ip], port=port, auth_provider=auth_provider)
         session = cluster.connect()
         return session, cluster
     except Exception as e:

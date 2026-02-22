@@ -24,6 +24,7 @@ from datetime import datetime
 from urllib.parse import unquote
 from dateutil import tz, parser
 from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
 
 
 def convert_local_datetime_to_epoch(local_dt):
@@ -112,7 +113,12 @@ def execute_range_query(keyspace, table, symbol, begin_dt_str, end_dt_str):
         # Connect to Cassandra cluster and execute query
         cassandra_host = os.environ.get('CASSANDRA_HOST', 'cassandra-node')
         cassandra_port = int(os.environ.get('CASSANDRA_PORT', '9042'))
-        cluster = Cluster([cassandra_host], port=cassandra_port)
+        cassandra_user = os.environ.get('CASSANDRA_USER', '')
+        cassandra_password = os.environ.get('CASSANDRA_PASSWORD', '')
+        auth_provider = None
+        if cassandra_user and cassandra_password:
+            auth_provider = PlainTextAuthProvider(username=cassandra_user, password=cassandra_password)
+        cluster = Cluster([cassandra_host], port=cassandra_port, auth_provider=auth_provider)
         session = cluster.connect(keyspace)
         
         query_str = (f"SELECT * FROM {keyspace}.{table} "

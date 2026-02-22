@@ -17,9 +17,11 @@ Date: 2025
 """
 
 import sys
+import os
 import datetime
 # Note: Requires cassandra-driver package: pip install cassandra-driver
 from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
 
 # Global configuration variables
 cassandra_ip = ""
@@ -117,7 +119,12 @@ def loop_read_from_stdin():
     of input data, converting it to the appropriate format for database insertion.
     """
     # Connect to Cassandra cluster
-    cluster = Cluster([cassandra_ip])
+    cassandra_user = os.environ.get('CASSANDRA_USER', '')
+    cassandra_password = os.environ.get('CASSANDRA_PASSWORD', '')
+    auth_provider = None
+    if cassandra_user and cassandra_password:
+        auth_provider = PlainTextAuthProvider(username=cassandra_user, password=cassandra_password)
+    cluster = Cluster([cassandra_ip], auth_provider=auth_provider)
     session = cluster.connect()
     session.set_keyspace(cassandra_db)
 

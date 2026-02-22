@@ -35,6 +35,7 @@ import json
 import os
 import urllib.parse
 from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
 
 
 # Default symbol for testing purposes
@@ -119,7 +120,12 @@ def get_symbol_summary(keyspace, symbol):
     # Initialize Cassandra cluster connection
     cassandra_host = os.environ.get('CASSANDRA_HOST', 'cassandra-node')
     cassandra_port = int(os.environ.get('CASSANDRA_PORT', '9042'))
-    cluster = Cluster([cassandra_host], port=cassandra_port)
+    cassandra_user = os.environ.get('CASSANDRA_USER', '')
+    cassandra_password = os.environ.get('CASSANDRA_PASSWORD', '')
+    auth_provider = None
+    if cassandra_user and cassandra_password:
+        auth_provider = PlainTextAuthProvider(username=cassandra_user, password=cassandra_password)
+    cluster = Cluster([cassandra_host], port=cassandra_port, auth_provider=auth_provider)
     session = cluster.connect(keyspace)
     all_data = {}
 

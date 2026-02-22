@@ -63,11 +63,13 @@ Date: 2024
 """
 
 import sys
+import os
 import gzip
 from datetime import datetime, time
 from collections import defaultdict
 from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement
+from cassandra.auth import PlainTextAuthProvider
 
 
 def parse_datetime(dt_str):
@@ -166,7 +168,12 @@ def query_minute_bars(cassandra_ip, port, keyspace, symbol, begin_dt, end_dt):
     cluster = None
     try:
         # Connect to Cassandra
-        cluster = Cluster([cassandra_ip], port=int(port), connect_timeout=10)
+        cassandra_user = os.environ.get('CASSANDRA_USER', '')
+        cassandra_password = os.environ.get('CASSANDRA_PASSWORD', '')
+        auth_provider = None
+        if cassandra_user and cassandra_password:
+            auth_provider = PlainTextAuthProvider(username=cassandra_user, password=cassandra_password)
+        cluster = Cluster([cassandra_ip], port=int(port), connect_timeout=10, auth_provider=auth_provider)
         session = cluster.connect(keyspace)
         
         # Prepare query

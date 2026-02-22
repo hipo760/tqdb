@@ -11,6 +11,8 @@ services:
       - CASSANDRA_HOST=cassandra
       - CASSANDRA_PORT=9042
       - CASSANDRA_KEYSPACE=tqdb1
+      - CASSANDRA_USER=tqdb
+      - CASSANDRA_PASSWORD=tqdb1234
       - TOOLS_DIR=/opt/tqdb/tools
       - TZ=UTC
       - WAIT_FOR_CASSANDRA=true

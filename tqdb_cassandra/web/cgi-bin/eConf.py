@@ -25,6 +25,7 @@ import cgi
 import cgitb
 from datetime import datetime
 from cassandra.cluster import Cluster
+from cassandra.auth import PlainTextAuthProvider
 
 # Enable CGI error reporting for debugging
 cgitb.enable()
@@ -56,7 +57,12 @@ def execute_config_operation(keyspace, conf_key, conf_val, cmd):
         # Establish database connection
         cassandra_host = os.environ.get('CASSANDRA_HOST', 'cassandra-node')
         cassandra_port = int(os.environ.get('CASSANDRA_PORT', '9042'))
-        cluster = Cluster([cassandra_host], port=cassandra_port)
+        cassandra_user = os.environ.get('CASSANDRA_USER', '')
+        cassandra_password = os.environ.get('CASSANDRA_PASSWORD', '')
+        auth_provider = None
+        if cassandra_user and cassandra_password:
+            auth_provider = PlainTextAuthProvider(username=cassandra_user, password=cassandra_password)
+        cluster = Cluster([cassandra_host], port=cassandra_port, auth_provider=auth_provider)
         session = cluster.connect(keyspace)
         
         if cmd == 'UPDATE':

@@ -10,6 +10,10 @@ services:
       - CASSANDRA_CLUSTER_NAME=tqdb_single_node
       - MAX_HEAP_SIZE=1536M
       - HEAP_NEWSIZE=400M
+      - CASSANDRA_AUTHENTICATOR=PasswordAuthenticator
+      - CASSANDRA_AUTHORIZER=CassandraAuthorizer
+      - CASSANDRA_USER=tqdb
+      - CASSANDRA_PASSWORD=tqdb1234
     ports:
       - "9042:9042"  # CQL native transport
       - "7199:7199"  # JMX monitoring (optional)
@@ -19,7 +23,7 @@ services:
     networks:
       - tqdb_network
     healthcheck:
-      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES;' || exit 1"]
+      test: ["CMD-SHELL", "cqlsh -u tqdb -p tqdb1234 -e 'DESCRIBE KEYSPACES;' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
