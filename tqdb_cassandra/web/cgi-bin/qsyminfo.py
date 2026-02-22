@@ -90,7 +90,7 @@ def query_symbol_info(symbol):
         # Construct command to run Python qsym replacement
         # Format: python3 qsym.py <cassandra_ip> <port> <keyspace.table> <mode> <symbol> <limit> > <output_file>
         python_binaries_dir = os.path.join(TOOLS_DIR, '../python-binaries')
-        command = f"python3 {python_binaries_dir}/qsym.py {CASSANDRA_IP} {CASSANDRA_PORT} {CASSANDRA_DB}.symbol 0 {symbol} 1 > {temp_file}"
+        command = f"python3 {python_binaries_dir}/qsym.py {CASSANDRA_IP} {CASSANDRA_PORT} {CASSANDRA_DB}.symbol 0 {symbol} 10000 > {temp_file}"
         
         # Execute the qsym Python script
         result = subprocess.call(
@@ -114,6 +114,9 @@ def query_symbol_info(symbol):
         # This handles cases where the qsym utility outputs Python-style dictionaries
         clean_json_str = json_str.replace("'", '"')
         symbol_objects = json.loads(clean_json_str)
+        
+        # Sort symbols alphabetically by symbol name
+        symbol_objects.sort(key=lambda x: x.get('symbol', ''))
         
         return symbol_objects
         

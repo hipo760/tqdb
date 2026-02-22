@@ -30,6 +30,8 @@ function qSymInfo()
     url='/cgi-bin/qsyminfo.py'
     DoAjax(url, {symbol : "ALL"},
         function(data, textStatus, jqXHR){
+		console.log('Received symbol data:', data);
+		console.log('Number of symbols:', data.length);
 		makeMainTable(data);
         }); 
 }
