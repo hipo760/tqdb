@@ -4,4 +4,11 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "apscheduler>=3.10.4",
+    "cassandra-driver>=3.29.3",
+    "fastapi>=0.115.0",
+    "httpx>=0.28.1",
+    "pydantic>=2.0",
+    "uvicorn[standard]>=0.30.0",
+]

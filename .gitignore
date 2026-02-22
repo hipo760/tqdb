@@ -25,3 +25,7 @@ Thumbs.db
 
 # Logs
 *.log
+crypto/bybit/config.json
+crypto/uv.lock
+
+crypto/bybit/.env

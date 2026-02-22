@@ -1,0 +1,63 @@
+services:
+  bybit-kline-backfill:
+    build:
+      # Context is crypto/ so pyproject.toml, uv.lock and bybit/ are all reachable
+      context: ..
+      dockerfile: bybit/backfill/Dockerfile
+    image: kline-backfill
+    container_name: kline-backfill
+    restart: unless-stopped
+
+    environment:
+      # --- Cassandra ---
+      - CASSANDRA_HOST=${CASSANDRA_HOST:-cassandra}
+      - CASSANDRA_PORT=${CASSANDRA_PORT:-9042}
+      - CASSANDRA_USER=${CASSANDRA_USER:-tqdb}
+      - CASSANDRA_PASSWORD=${CASSANDRA_PASSWORD:-tqdb1234}
+      - CASSANDRA_KEYSPACE=${CASSANDRA_KEYSPACE:-tqdb1}
+      - CASSANDRA_TABLE=${CASSANDRA_TABLE:-minbar}
+
+      # --- Symbol source ---
+      # "api" (default) or "file" (reads symbols.json mounted below)
+      - SYMBOL_SOURCE=${SYMBOL_SOURCE:-api}
+      - SYMBOL_API_URL=${SYMBOL_API_URL:-}
+      - SYMBOL_API_TOKEN=${SYMBOL_API_TOKEN:-}
+
+      # --- Job tuning ---
+      # How many days the daily 00:00 UTC job patches
+      - DAILY_BACKFILL_DAYS=${DAILY_BACKFILL_DAYS:-3}
+
+      # --- API server ---
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+
+      - TZ=UTC
+
+    ports:
+      - "${BACKFILL_API_PORT:-8765}:8000"
+
+    volumes:
+      # Optional: mount a symbols.json when SYMBOL_SOURCE=file
+      - ${SYMBOLS_FILE:-/dev/null}:/app/symbols.json:ro
+
+    networks:
+      - tqdb_network
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  tqdb_network:
+    external: true
+    name: cassandra_tqdb_network
