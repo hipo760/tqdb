@@ -8,8 +8,8 @@ The Cassandra-based implementation of TQDB (Time-series Quote Database). Stores 
 tqdb_cassandra/
 ├── cassandra/                  # Cassandra database container
 │   ├── docker-compose.yml      # Single-node Cassandra service
-│   ├── init-schema.cql         # Schema for Cassandra 5.0 (SimpleStrategy)
-│   ├── init-schema-v4.cql      # Schema for Cassandra 4.x
+│   ├── init-schema.cql         # Canonical schema for Cassandra 4.1.10
+│   ├── README.md               # Cassandra startup and schema apply guide
 │   ├── cassandra.yaml          # Custom Cassandra configuration
 │   └── data/                   # Persistent data volume (gitignored)
 │
@@ -45,8 +45,8 @@ Single-node Apache Cassandra instance for storing time-series market data.
 | `tqdb1.tick` | Raw tick data with bid/ask/last prices |
 | `tqdb1.secbar` | 1-second OHLCV bars |
 | `tqdb1.minbar` | 1-minute OHLCV bars |
-| `tqdb1.daybar` | Daily OHLCV bars |
 | `tqdb1.symbol` | Symbol metadata |
+| `tqdb1.conf` | System configuration key-values |
 
 **Quick Start:**
 
@@ -57,6 +57,8 @@ docker compose up -d
 # Initialize schema (once Cassandra is healthy)
 docker exec -i tqdb-cassandra cqlsh -u tqdb -p tqdb1234 < init-schema.cql
 ```
+
+See [`cassandra/README.md`](cassandra/README.md) for full startup and verification steps.
 
 > ⚠️ **Security Note:** The default credentials (`tqdb` / `tqdb1234`) in `docker-compose.yml` are for development only. Change them before deploying to production and update all downstream services accordingly.
 

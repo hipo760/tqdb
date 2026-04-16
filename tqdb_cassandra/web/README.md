@@ -56,7 +56,7 @@ web-container/
 
 1. **Cassandra must be running** on the external network:
    ```bash
-   docker network ls | grep cassandra_crypto_node_tqdb_network
+   docker network ls | grep tqdb_network
    ```
 
 2. **Docker & Docker Compose** installed
@@ -64,7 +64,7 @@ web-container/
 ### Build & Run
 
 ```bash
-cd /home/ubuntu/services/tqdb/web-container
+cd tqdb_cassandra/web/
 
 # Build and start
 docker compose build
@@ -108,28 +108,24 @@ Set in `docker-compose.yml`:
 
 ### Network
 
-- **External Network**: `cassandra_crypto_node_tqdb_network`
+- **External Network**: `tqdb_network`
 - **Container IP**: Dynamically assigned (172.25.0.x)
 - **Port Mapping**: `2380:80` (host:container)
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│  External Network: cassandra_crypto_node_tqdb_network│
-│                                                      │
-│  ┌─────────────────────────┐  ┌─────────────────┐  │
-│  │  tqdb-web (172.25.0.3)  │  │  cassandra-node │  │
-│  │  - Apache 2.4           │  │  (172.25.0.2)   │  │
-│  │  - Python 3.11 CGI      │──┼─▶ CQL :9042     │  │
-│  │  - Port 2380:80         │  │  - Cassandra 4.1│  │
-│  └─────────────────────────┘  └─────────────────┘  │
-│           ▲                                          │
-│           │ HTTP                                     │
-│           │                                          │
-└───────────┼──────────────────────────────────────────┘
-            │
-      Host :2380
+```mermaid
+flowchart TB
+   host[Host :2380]
+
+   subgraph network[External Network: tqdb_network]
+      direction LR
+      web[tqdb-web<br/>172.25.0.3<br/>Apache 2.4<br/>Python 3.11 CGI<br/>Port 2380:80]
+      cass[cassandra-node<br/>172.25.0.2<br/>Cassandra 4.1]
+      web -->|CQL :9042| cass
+   end
+
+   host -->|HTTP| web
 ```
 
 ## 🔌 API Endpoints
@@ -242,7 +238,7 @@ python3 qsymbol.py
 **Solution**: Check Cassandra is running and network exists
 ```bash
 docker ps | grep cassandra-node
-docker network ls | grep cassandra_crypto_node_tqdb_network
+docker network ls | grep tqdb_network
 ```
 
 **Issue**: "Connection refused" errors  
