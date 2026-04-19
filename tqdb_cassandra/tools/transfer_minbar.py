@@ -46,6 +46,65 @@ class MinbarTransfer:
         
         self.source_session = None
         self.target_session = None
+
+    @staticmethod
+    def is_transfer_symbol_allowed(symbol: str) -> bool:
+        """Allow only symbols that pass transfer-time safety guards."""
+        return not symbol.startswith("D_") and "'" not in symbol
+
+    def filter_symbols_for_transfer(self, symbols: List[str]) -> List[str]:
+        """Filter and report blocked symbols for transfer-only validation."""
+        blocked = [s for s in symbols if not self.is_transfer_symbol_allowed(s)]
+        if blocked:
+            preview = ', '.join(blocked[:20])
+            suffix = '' if len(blocked) <= 20 else ', ...'
+            print(
+                f"Skipping {len(blocked)} symbol(s) blocked by transfer guard "
+                f"(prefix 'D_' or contains apostrophe): {preview}{suffix}"
+            )
+        return [s for s in symbols if self.is_transfer_symbol_allowed(s)]
+
+    def ensure_symbol_exists(self, symbol: str) -> bool:
+        """Ensure symbol metadata exists in target symbol table."""
+        try:
+            # Fast path: symbol already exists in target.
+            exists_query = "SELECT symbol FROM tqdb1.symbol WHERE symbol = %s"
+            target_row = self.target_session.execute(exists_query, [symbol], timeout=self.timeout).one()
+            if target_row:
+                return True
+
+            # Try to copy metadata from source if available.
+            source_keyval = None
+            try:
+                source_query = "SELECT keyval FROM tqdb1.symbol WHERE symbol = %s"
+                source_row = self.source_session.execute(source_query, [symbol], timeout=self.timeout).one()
+                if source_row and hasattr(source_row, 'keyval') and source_row.keyval:
+                    source_keyval = dict(source_row.keyval)
+            except Exception:
+                # Source may not have symbol table or keyval column in older schemas.
+                source_keyval = None
+
+            if source_keyval is None:
+                source_keyval = {
+                    'DESC': '',
+                    'BPV': '1',
+                    'MKO': '0',
+                    'MKC': '0',
+                    'SSEC': '0'
+                }
+
+            try:
+                insert_with_keyval = "INSERT INTO tqdb1.symbol (symbol, keyval) VALUES (%s, %s)"
+                self.target_session.execute(insert_with_keyval, [symbol, source_keyval], timeout=self.timeout)
+            except Exception:
+                # Fallback for schemas without keyval column.
+                insert_symbol_only = "INSERT INTO tqdb1.symbol (symbol) VALUES (%s)"
+                self.target_session.execute(insert_symbol_only, [symbol], timeout=self.timeout)
+
+            return True
+        except Exception as e:
+            print(f"  Warning: failed to ensure symbol metadata for {symbol}: {e}")
+            return False
         
     def connect(self):
         """Establish connections to source and target Cassandra."""
@@ -90,7 +149,11 @@ class MinbarTransfer:
         rows = self.source_session.execute(query)
         symbols = sorted([row.symbol for row in rows])
         print(f"Found {len(symbols)} symbols")
-        return symbols
+
+        filtered_symbols = self.filter_symbols_for_transfer(symbols)
+        if len(filtered_symbols) != len(symbols):
+            print(f"Transfer symbol list after guard: {len(filtered_symbols)}")
+        return filtered_symbols
     
     def count_rows_for_symbol(self, symbol: str, year: Optional[int] = None) -> int:
         """Count number of rows for a specific symbol, optionally filtered by year."""
@@ -112,8 +175,26 @@ class MinbarTransfer:
         if row.min_dt and row.max_dt:
             return (row.min_dt.year, row.max_dt.year)
         return (None, None)
+
+    def get_last_bar_datetime(self, session, symbol: str):
+        """Get latest minbar datetime for a symbol from the provided session."""
+        query = "SELECT MAX(datetime) as max_dt FROM tqdb1.minbar WHERE symbol = %s"
+        result = session.execute(query, [symbol], timeout=self.timeout * 2)
+        row = result.one()
+        return row.max_dt if row and row.max_dt else None
+
+    def count_rows_for_symbol_range(self, symbol: str, start_dt, end_dt) -> int:
+        """Count rows for a symbol between start/end datetime (inclusive)."""
+        if start_dt is None:
+            query = "SELECT COUNT(*) FROM tqdb1.minbar WHERE symbol = %s AND datetime <= %s"
+            result = self.source_session.execute(query, [symbol, end_dt], timeout=self.timeout * 2)
+        else:
+            query = "SELECT COUNT(*) FROM tqdb1.minbar WHERE symbol = %s AND datetime >= %s AND datetime <= %s"
+            result = self.source_session.execute(query, [symbol, start_dt, end_dt], timeout=self.timeout * 2)
+        return result.one().count
     
-    def transfer_symbol(self, symbol: str, batch_size: int = 1000, use_year_partition: bool = False) -> dict:
+    def transfer_symbol(self, symbol: str, batch_size: int = 1000, use_year_partition: bool = False,
+                        avoid_repeat: bool = False) -> dict:
         """Transfer all data for a single symbol from source to target."""
         stats = {
             'symbol': symbol,
@@ -125,6 +206,44 @@ class MinbarTransfer:
         }
         
         try:
+            if avoid_repeat:
+                source_last = self.get_last_bar_datetime(self.source_session, symbol)
+                if not source_last:
+                    print(f"  No source data found for {symbol}")
+                    stats['end_time'] = datetime.now()
+                    return stats
+
+                target_last = self.get_last_bar_datetime(self.target_session, symbol)
+                print(f"  Source last 1min bar: {source_last}")
+                print(f"  Target last 1min bar: {target_last if target_last else 'None'}")
+
+                if target_last and target_last > source_last:
+                    print(f"  Target is ahead of source for {symbol}, skipping")
+                    stats['end_time'] = datetime.now()
+                    return stats
+
+                range_start = target_last
+                range_end = source_last
+                total_rows = self.count_rows_for_symbol_range(symbol, range_start, range_end)
+                if total_rows == 0:
+                    print(f"  No incremental rows needed for {symbol}")
+                    stats['end_time'] = datetime.now()
+                    return stats
+
+                self.ensure_symbol_exists(symbol)
+                print(f"  Incremental transfer rows for {symbol}: {total_rows:,} ({range_start} -> {range_end})")
+                range_stats = self.transfer_symbol_range(symbol, range_start, range_end, batch_size, total_rows)
+                stats['rows_read'] = range_stats['rows_read']
+                stats['rows_written'] = range_stats['rows_written']
+                stats['errors'] = range_stats['errors']
+                stats['end_time'] = datetime.now()
+
+                duration = (stats['end_time'] - stats['start_time']).total_seconds()
+                print(f"  ✓ Completed {symbol}: {stats['rows_written']:,} rows in {duration:.2f}s")
+                return stats
+
+            self.ensure_symbol_exists(symbol)
+
             if use_year_partition:
                 # Get year range for this symbol
                 print(f"  Getting year range for {symbol}...")
@@ -173,6 +292,75 @@ class MinbarTransfer:
             stats['end_time'] = datetime.now()
             stats['errors'] += 1
         
+        return stats
+
+    def transfer_symbol_range(self, symbol: str, start_dt, end_dt, batch_size: int,
+                              total_rows: Optional[int] = None) -> dict:
+        """Transfer data for a symbol from start_dt to end_dt (inclusive)."""
+        stats = {
+            'rows_read': 0,
+            'rows_written': 0,
+            'errors': 0
+        }
+
+        try:
+            insert_query = """
+                INSERT INTO tqdb1.minbar (symbol, datetime, open, high, low, close, vol)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            prepared_insert = self.target_session.prepare(insert_query)
+
+            if start_dt is None:
+                select_query = """SELECT symbol, datetime, open, high, low, close, vol
+                                 FROM tqdb1.minbar
+                                 WHERE symbol = ? AND datetime <= ?"""
+                statement = self.source_session.prepare(select_query)
+                statement.fetch_size = 5000
+                rows = self.source_session.execute(statement, [symbol, end_dt], timeout=None)
+            else:
+                select_query = """SELECT symbol, datetime, open, high, low, close, vol
+                                 FROM tqdb1.minbar
+                                 WHERE symbol = ? AND datetime >= ? AND datetime <= ?"""
+                statement = self.source_session.prepare(select_query)
+                statement.fetch_size = 5000
+                rows = self.source_session.execute(statement, [symbol, start_dt, end_dt], timeout=None)
+
+            desc = f"  {symbol} incremental"
+            batch = []
+            with tqdm(total=total_rows, desc=desc, unit="rows", leave=True) as pbar:
+                for row in rows:
+                    stats['rows_read'] += 1
+                    try:
+                        batch.append((
+                            row.symbol,
+                            row.datetime,
+                            row.open,
+                            row.high,
+                            row.low,
+                            row.close,
+                            row.vol
+                        ))
+
+                        if len(batch) >= batch_size:
+                            for record in batch:
+                                self.target_session.execute(prepared_insert, record, timeout=self.timeout)
+                            stats['rows_written'] += len(batch)
+                            pbar.update(len(batch))
+                            batch = []
+                    except Exception as e:
+                        stats['errors'] += 1
+                        print(f"\n    Warning: Error inserting row: {e}")
+
+                if batch:
+                    for record in batch:
+                        self.target_session.execute(prepared_insert, record, timeout=self.timeout)
+                    stats['rows_written'] += len(batch)
+                    pbar.update(len(batch))
+
+        except Exception as e:
+            print(f"    ✗ Error transferring incremental range: {e}")
+            stats['errors'] += 1
+
         return stats
     
     def transfer_symbol_year(self, symbol: str, year: Optional[int], batch_size: int, 
@@ -269,18 +457,22 @@ class MinbarTransfer:
         
         return stats
     
-    def transfer_symbols(self, symbols: List[str], batch_size: int = 1000, use_year_partition: bool = False) -> List[dict]:
+    def transfer_symbols(self, symbols: List[str], batch_size: int = 1000,
+                         use_year_partition: bool = False, avoid_repeat: bool = False) -> List[dict]:
         """Transfer data for multiple symbols sequentially."""
+        symbols = self.filter_symbols_for_transfer(symbols)
         all_stats = []
         
         print(f"\nStarting transfer of {len(symbols)} symbols...")
+        if avoid_repeat:
+            print("Using avoid-repeat mode (tail incremental by last 1min bar)")
         if use_year_partition:
             print("Using year-based partitioning for large datasets")
         print("=" * 70)
         
         for i, symbol in enumerate(symbols, 1):
             print(f"\n[{i}/{len(symbols)}] Processing {symbol}")
-            stats = self.transfer_symbol(symbol, batch_size, use_year_partition)
+            stats = self.transfer_symbol(symbol, batch_size, use_year_partition, avoid_repeat)
             all_stats.append(stats)
             
             # Small delay between symbols
@@ -370,6 +562,8 @@ Examples:
     parser.add_argument('--batch-size', type=int, default=1000, help='Batch size for inserts (default: 1000)')
     parser.add_argument('--timeout', type=int, default=120, help='Query timeout in seconds (default: 120, use higher for large datasets)')
     parser.add_argument('--year-partition', action='store_true', help='Use year-based partitioning for large datasets (recommended for crypto symbols)')
+    parser.add_argument('--avoid-repeat', action='store_true',
+                        help='Incremental mode: compare last 1min bar on target/source and transfer from target_last to source_last')
     
     args = parser.parse_args()
     
@@ -394,17 +588,22 @@ Examples:
         if args.all_symbols:
             symbols = transfer.get_all_symbols()
         else:
-            symbols = [s.strip().upper() for s in args.symbols.split(',')]
+            requested_symbols = [s.strip().upper() for s in args.symbols.split(',') if s.strip()]
+            symbols = transfer.filter_symbols_for_transfer(requested_symbols)
         
         if not symbols:
             print("No symbols to transfer")
             return
         
         # Perform transfer
+        if args.avoid_repeat and args.year_partition:
+            print("Warning: --avoid-repeat ignores year partition flow and uses direct datetime range transfer")
+
         all_stats = transfer.transfer_symbols(
             symbols, 
             batch_size=args.batch_size,
-            use_year_partition=args.year_partition
+            use_year_partition=args.year_partition,
+            avoid_repeat=args.avoid_repeat
         )
         
         # Print summary

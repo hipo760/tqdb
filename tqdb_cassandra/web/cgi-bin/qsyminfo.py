@@ -36,6 +36,7 @@ import sys
 import os
 import subprocess
 import json
+import ast
 import time
 import datetime
 import urllib.parse
@@ -109,14 +110,19 @@ def query_symbol_info(symbol):
         # Clean up the temporary file
         os.remove(temp_file)
         
-        # Parse JSON response
-        # Note: Original code replaced single quotes with double quotes for JSON compatibility
-        # This handles cases where the qsym utility outputs Python-style dictionaries
-        clean_json_str = json_str.replace("'", '"')
-        symbol_objects = json.loads(clean_json_str)
+        # Parse response.
+        # First, treat output as proper JSON. If legacy tooling returns Python literals,
+        # fall back to ast.literal_eval without mutating the original payload.
+        try:
+            symbol_objects = json.loads(json_str)
+        except json.JSONDecodeError:
+            symbol_objects = ast.literal_eval(json_str)
+
+        if not isinstance(symbol_objects, list):
+            raise json.JSONDecodeError("Top-level symbol payload is not a list", str(symbol_objects), 0)
         
         # Sort symbols alphabetically by symbol name
-        symbol_objects.sort(key=lambda x: x.get('symbol', ''))
+        symbol_objects.sort(key=lambda x: x.get('symbol', '') if isinstance(x, dict) else '')
         
         return symbol_objects
         

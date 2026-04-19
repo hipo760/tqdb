@@ -30,10 +30,28 @@ function qSymInfo()
     url='/cgi-bin/qsyminfo.py'
     DoAjax(url, {symbol : "ALL"},
         function(data, textStatus, jqXHR){
+        if (data && data.status === 'failed') {
+            console.error('Symbol query failed:', data);
+            alert(data.error + (data.details ? ('\n' + data.details) : ''));
+            makeMainTable([]);
+            return;
+        }
+        if (!Array.isArray(data)) {
+            console.error('Unexpected symbol response format:', data);
+            alert('Unexpected symbol response format');
+            makeMainTable([]);
+            return;
+        }
 		console.log('Received symbol data:', data);
 		console.log('Number of symbols:', data.length);
 		makeMainTable(data);
-        }); 
+        },
+        function(jqXHR, textStatus, errorThrown){
+            console.error('Symbol query HTTP error:', textStatus, errorThrown);
+            alert('Failed to load symbols: ' + textStatus);
+            makeMainTable([]);
+        }
+    ); 
 }
 function doAddNewSym(sym){
  if (sym.length==0)
