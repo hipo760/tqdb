@@ -1,0 +1,124 @@
+<html>
+<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />
+<link rel='stylesheet' type='text/css' href='/style.css'>
+<script src="/js/jquery-2.1.4.min.js"></script>
+<script language='javascript'>
+function myUrlEncode(str)
+{
+    return encodeURI(str).replace(/&/i, '%26')
+}
+
+function DoAjax(requestUrl, sentData, sHandler, eHandler, pageNotFoundHandler){
+    $.ajax({
+        type: 'GET',
+        url: requestUrl,
+        cache: false,
+        data: sentData,
+        success: sHandler,
+        error: eHandler,
+        statusCode: {
+            404: pageNotFoundHandler
+        }
+    });
+}
+
+function qContinuousInfo()
+{
+    DoAjax('/cgi-bin/qContinuousSymbolInfo.py', {},
+        function(data, textStatus, jqXHR){
+            if (data && data.status === 'failed') {
+                alert('Failed to load continuous symbols: ' + data.error)
+                makeMainTable([])
+                return
+            }
+            makeMainTable((data && data.symbols) ? data.symbols : [])
+        },
+        function(jqXHR, textStatus, errorThrown){
+            alert('Failed to load continuous symbols: ' + textStatus)
+            makeMainTable([])
+        }
+    )
+}
+
+function buildQ1minUrl(sym, end){
+    if (!end || end === '-') {
+        return ''
+    }
+    var range = getLastFiveDaysRange(end)
+    if (!range) {
+        return ''
+    }
+    return '/cgi-bin/q1min.py?symbol=' + myUrlEncode(sym) + '&BEG=' + myUrlEncode(range.beg) + '&END=' + myUrlEncode(range.end)
+}
+
+function getLastFiveDaysRange(end){
+    // Use last 5 days of available data
+    var endDate = new Date(end.replace(' ', 'T') + 'Z')
+    if (isNaN(endDate.getTime())) {
+        return null
+    }
+    var begDate = new Date(endDate.getTime() - 5 * 24 * 60 * 60 * 1000)
+    function pad(n){ return n < 10 ? '0' + n : '' + n }
+    function fmtUtc(d){
+        return d.getUTCFullYear() + '-' + pad(d.getUTCMonth()+1) + '-' + pad(d.getUTCDate()) + ' '
+             + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds())
+    }
+    return {
+        beg: fmtUtc(begDate),
+        end: fmtUtc(endDate)
+    }
+}
+
+function buildChartUrl(sym, end){
+    if (!end || end === '-') {
+        return ''
+    }
+    var range = getLastFiveDaysRange(end)
+    if (!range) {
+        return ''
+    }
+    return '/cchart.html?symbol=' + myUrlEncode(sym) + '&BEG=' + myUrlEncode(range.beg) + '&END=' + myUrlEncode(range.end)
+}
+
+function makeMainTable(symbols)
+{
+    var strTable = "<table>"
+    strTable += "<tr class='grayThing smallfont'><td>#</td><td>Symbol</td><td>Start (UTC)</td><td>End (UTC)</td><td>Actions</td></tr>"
+
+    for (var i = 0; i < symbols.length; ++i)
+    {
+        var s = symbols[i]
+        var start = s.start ? s.start : '-'
+        var end = s.end ? s.end : '-'
+        var queryUrl = buildQ1minUrl(s.symbol, end)
+        var chartUrl = buildChartUrl(s.symbol, end)
+        var actions = '-'
+        if (queryUrl && chartUrl) {
+            actions = "<a href='" + queryUrl + "'>Query 1Min</a> | <a href='" + chartUrl + "'>Open Chart</a>"
+        }
+
+        strTable += "<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\">"
+        strTable += "<td>" + (i + 1) + "</td>"
+        strTable += "<td>" + s.symbol + "</td>"
+        strTable += "<td>" + start + "</td>"
+        strTable += "<td>" + end + "</td>"
+        strTable += "<td>" + actions + "</td>"
+        strTable += "</tr>"
+    }
+
+    if (symbols.length === 0) {
+        strTable += "<tr><td colspan='5'>No continuous symbol range found</td></tr>"
+    }
+
+    strTable += "</table>"
+    document.getElementById('csymbolTableDiv').innerHTML = strTable
+}
+</script>
+<body onload='qContinuousInfo();'>
+<div style='margin-bottom: 10px;'>
+    <a href='/esymbol.html'><button type='button'>TAIFEX</button></a>
+    <a href='/csymbol.html'><button type='button'>Continuous</button></a>
+</div>
+<hr>
+<div id='csymbolTableDiv'>Loading...</div>
+</body></html>

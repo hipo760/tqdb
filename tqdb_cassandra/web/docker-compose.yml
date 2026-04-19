@@ -1,8 +1,8 @@
 services:
   tqdb-web:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../
+      dockerfile: web/Dockerfile
     container_name: tqdb-web
     hostname: tqdb-web
     
@@ -14,6 +14,7 @@ services:
       - CASSANDRA_USER=tqdb
       - CASSANDRA_PASSWORD=tqdb1234
       - TOOLS_DIR=/opt/tqdb/tools
+      - TAIFEX_HOLIDAY_CSV=/opt/tqdb/feature-custom-symbol/TAIFEX/taifex_holidays_sample.csv
       - TZ=UTC
       - WAIT_FOR_CASSANDRA=true
       - TQDB_ENDPOINT_LOGGING=true

@@ -36,27 +36,31 @@ RUN mkdir -p /opt/tqdb/tools \
     && mkdir -p /var/www/html
 
 # Copy Python binaries (replacement for C++ binaries)
-COPY python-binaries/ /opt/tqdb/python-binaries/
+COPY web/python-binaries/ /opt/tqdb/python-binaries/
 RUN chmod +x /opt/tqdb/python-binaries/*.py 2>/dev/null || true
 
 # Copy shell scripts and utilities
-COPY scripts/ /opt/tqdb/scripts/
+COPY web/scripts/ /opt/tqdb/scripts/
 RUN chmod +x /opt/tqdb/scripts/*.sh 2>/dev/null || true \
     && chmod +x /opt/tqdb/scripts/*.py 2>/dev/null || true
+
+# Copy feature/custom symbol data (includes TAIFEX holiday calendar)
+COPY feature-custom-symbol /opt/tqdb/feature-custom-symbol
+RUN chmod -R +r /opt/tqdb/feature-custom-symbol
 
 # Create symlinks in /opt/tqdb/tools for backward compatibility
 RUN ln -s /opt/tqdb/python-binaries /opt/tqdb/tools/python-binaries \
     && ln -s /opt/tqdb/scripts /opt/tqdb/tools/scripts
 
 # Copy CGI scripts
-COPY cgi-bin/ /var/www/cgi-bin/
+COPY web/cgi-bin/ /var/www/cgi-bin/
 RUN chmod +x /var/www/cgi-bin/*.py 2>/dev/null || true
 
 # Copy static HTML/CSS/JS files
-COPY html/ /var/www/html/
+COPY web/html/ /var/www/html/
 
 # Copy Apache configuration
-COPY config/apache.conf /etc/apache2/sites-available/tqdb.conf
+COPY web/config/apache.conf /etc/apache2/sites-available/tqdb.conf
 
 # Enable TQDB site and disable default
 RUN a2ensite tqdb && \
@@ -97,7 +101,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost/ || exit 1
 
 # Copy entrypoint script
-COPY config/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY web/config/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Switch to entrypoint

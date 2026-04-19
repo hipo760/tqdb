@@ -121,36 +121,79 @@ function close_newSymModal(){
     $('#newSymModal').hide();
 }
 allSymInfo=[]
+filteredSymIndexes=[]
+currentPage=1
+pageSize=20
+
+function onFilterChange(){
+    currentPage = 1
+    renderMainTable()
+}
+
+function goPage(step){
+    var totalPages = Math.max(1, Math.ceil(filteredSymIndexes.length / pageSize))
+    currentPage = currentPage + step
+    if (currentPage < 1) currentPage = 1
+    if (currentPage > totalPages) currentPage = totalPages
+    renderMainTable()
+}
+
 function makeMainTable(jsonObj)
 {
     allSymInfo = jsonObj;
-    //ex:
-    //allsymbol = [{"symbol": "WTX", "keyval": {"MKO": "84500", "DESC": "Taifex", "MKC": "134500", "BPV": "200"}}]
-    len = allSymInfo.length
-    strTable="<table>"
+    currentPage = 1
+    renderMainTable()
+}
+
+function renderMainTable()
+{
+    var filterInput = document.getElementById('symbolFilter')
+    var filterText = ''
+    if (filterInput) {
+        filterText = (filterInput.value || '').toUpperCase().trim()
+    }
+
+    filteredSymIndexes = []
+    for (var i = 0; i < allSymInfo.length; ++i) {
+        var symbolText = ((allSymInfo[i] && allSymInfo[i]['symbol']) ? allSymInfo[i]['symbol'] : '').toUpperCase()
+        if (!filterText || symbolText.indexOf(filterText) >= 0) {
+            filteredSymIndexes.push(i)
+        }
+    }
+
+    var totalCount = filteredSymIndexes.length
+    var totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+    if (currentPage > totalPages) currentPage = totalPages
+
+    var start = (currentPage - 1) * pageSize
+    var end = Math.min(start + pageSize, totalCount)
+
+    var strTable="<table>"
     strTable+="<tr class='grayThing smallfont'><td rowspan=2>#</td><td rowspan=2>Symbol&nbsp;<input type='button' value='New' onclick='$(\"#newSymModal\").show();'/></td><td colspan=6>Symbol Settings</td></tr>"
     strTable+="<tr class='grayThing smallfont'><td>Desc.</td><td>BigPoint<br>Value</td><td>MarketOpen<br>(HHmmSS)</td><td>MarketClose<br>(HHmmSS)</td><td>Store<br>Sec</td></tr>"
-    
-    for (i=0;i<len;++i)
+
+    for (var row = start; row < end; ++row)
     {
-        symbol=allSymInfo[i]['symbol']
-        bpv=''
-        desc=''
-        mko=''
-        mkc=''
-        storesec_checked=''
-        if ('keyval' in allSymInfo[i])
+        var idx = filteredSymIndexes[row]
+        var sym = allSymInfo[idx]
+        var symbol = sym['symbol']
+        var bpv = ''
+        var desc = ''
+        var mko = ''
+        var mkc = ''
+        var storesec_checked = ''
+        if ('keyval' in sym)
         {
-            if ('BPV' in allSymInfo[i]['keyval']) bpv = allSymInfo[i]['keyval']['BPV'];
-            if ('DESC' in allSymInfo[i]['keyval']) desc = allSymInfo[i]['keyval']['DESC'];
-            if ('MKO' in allSymInfo[i]['keyval']) mko = allSymInfo[i]['keyval']['MKO'];
-            if ('MKC' in allSymInfo[i]['keyval']) mkc = allSymInfo[i]['keyval']['MKC'];
-            if ('SSEC' in allSymInfo[i]['keyval'] && 1 == allSymInfo[i]['keyval']['SSEC'])
+            if ('BPV' in sym['keyval']) bpv = sym['keyval']['BPV'];
+            if ('DESC' in sym['keyval']) desc = sym['keyval']['DESC'];
+            if ('MKO' in sym['keyval']) mko = sym['keyval']['MKO'];
+            if ('MKC' in sym['keyval']) mkc = sym['keyval']['MKC'];
+            if ('SSEC' in sym['keyval'] && 1 == sym['keyval']['SSEC'])
                 storesec_checked = 'Yes';
             try{desc=decodeURI(desc)}catch(e){}
         }
-        strTable+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\" onclick=\"showDlg("+i+");\" >"
-        strTable+="<td>"+(i+1)+"</td>"
+        strTable+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\" onclick=\"showDlg("+idx+");\" >"
+        strTable+="<td>"+(row+1)+"</td>"
         strTable+="<td>"+symbol+"</td>"
         strTable+="<td>"+desc+"</td>"
         strTable+="<td>"+bpv+"</td>"
@@ -159,12 +202,32 @@ function makeMainTable(jsonObj)
         strTable+="<td>"+storesec_checked+"</td>"
         strTable+="</tr>"
     }
+
+    if (totalCount === 0) {
+        strTable += "<tr><td colspan='7'>No symbols found</td></tr>"
+    }
+
     strTable+="</table>"
+    strTable += "<div style='margin-top:8px'>"
+    strTable += "<button type='button' onclick='goPage(-1)' " + (currentPage <= 1 ? "disabled" : "") + ">Prev</button> "
+    strTable += "Page " + currentPage + " / " + totalPages + " "
+    strTable += "<button type='button' onclick='goPage(1)' " + (currentPage >= totalPages ? "disabled" : "") + ">Next</button> "
+    strTable += "&nbsp;|&nbsp;Total: " + totalCount
+    strTable += "</div>"
+
     document.getElementById('symbolTableDiv').innerHTML = strTable;
 }
 </script>
 <body onload='qSymInfo();'>
+<div style='margin-bottom: 10px;'>
+    <a href='/esymbol.html'><button type='button'>TAIFEX</button></a>
+    <a href='/csymbol.html'><button type='button'>Continuous</button></a>
+</div>
 <hr>
+<div style='margin-bottom:8px;'>
+    Filter Symbol: <input type='text' id='symbolFilter' oninput='onFilterChange();' placeholder='Type symbol...'>
+    <button type='button' onclick='document.getElementById("symbolFilter").value=""; onFilterChange();'>Clear</button>
+</div>
 <div id='symbolTableDiv'></div>
 <div id="newSymModal" class='modal' style="display: none;">
   <!-- Modal content -->

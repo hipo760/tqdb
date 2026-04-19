@@ -1,0 +1,885 @@
+<html>
+<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />
+<link rel='stylesheet' type='text/css' href='/style.css'>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+#chartWrap { margin: 10px 0; }
+#chart { width: 100%; height: 620px; }
+#chartWrap {
+    position: relative;
+}
+.chart-layer {
+    position: relative;
+    z-index: 1;
+}
+.session-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 20;
+}
+.session-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 2px dashed;
+    opacity: 0.9;
+}
+.session-line.t {
+    border-left-color: #64b5f6;
+}
+.session-line.t1 {
+    border-left-color: #ffb74d;
+}
+.session-line.switch {
+    border-left-color: #f06292;
+}
+.info { margin: 8px 0; font-size: 13px; }
+.err { color: #b22222; font-weight: bold; }
+body {
+    background: #10151c;
+    color: #d7dde7;
+    margin: 8px;
+}
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+.toolbar label {
+    font-size: 13px;
+}
+.toolbar select,
+.toolbar button {
+    background: #1e2633;
+    color: #d7dde7;
+    border: 1px solid #3a465b;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+.loading-indicator {
+    color: #f3c969;
+    font-size: 12px;
+    display: none;
+}
+.switch-table-wrap {
+    margin-top: 12px;
+}
+.switch-table-wrap table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #131a24;
+}
+.switch-table-wrap th,
+.switch-table-wrap td {
+    border: 1px solid #2a3446;
+    padding: 6px 8px;
+    font-size: 12px;
+    text-align: left;
+}
+.switch-table-wrap th {
+    background: #1b2533;
+    color: #e8edf5;
+}
+</style>
+<body>
+<div>
+    <a href='/csymbol.html'><button type='button'>Back to Continuous</button></a>
+</div>
+<div class='toolbar'>
+    <label for='resolution'>Resolution:</label>
+    <select id='resolution'>
+        <option value='1'>1 minute</option>
+        <option value='10'>10 minutes</option>
+        <option value='15' selected>15 minutes</option>
+        <option value='30'>30 minutes</option>
+        <option value='1440'>1 day</option>
+    </select>
+    <button id='goLatestBtn' type='button'>Go Latest</button>
+    <span id='loadingState' class='loading-indicator'>Reloading chart data...</span>
+</div>
+<div class='info' id='meta'>Loading...</div>
+<div class='info' id='hoverOhlc'>Hover a bar to see OHLC (TAIFEX +8)</div>
+<div id='chartWrap'>
+    <div id='chart' class='chart-layer'></div>
+    <div id='sessionOverlay' class='session-overlay'></div>
+</div>
+<div class='switch-table-wrap'>
+    <div class='info' id='switchPointTitle'>Contract Switch Points (+8)</div>
+    <div id='switchPointTable'>Loading switch points...</div>
+</div>
+<div class='info err' id='err'></div>
+
+<script language='javascript'>
+var TAIFEX_OFFSET_SEC = 8 * 3600
+var MAX_BARS = 300
+var MAX_EXPAND_ATTEMPTS = 4
+var LOOKBACK_FACTOR = 1.4
+var currentChart = null
+var currentSeries = null
+var currentCandles = []
+var currentSymbol = ''
+var currentResolutionMin = 15
+var currentEndSec = 0
+var latestEndSec = 0
+var isLoadingOlder = false
+var isLoadingNewer = false
+var visibleRangeSubscribed = false
+var LAZY_LEFT_EDGE_THRESHOLD = 20
+var LAZY_RIGHT_GAP_THRESHOLD = 20
+var currentSwitchPoints = []
+var currentMetaText = ''
+
+function formatPrice(v) {
+    if (v === null || v === undefined || isNaN(v)) {
+        return '-'
+    }
+    return Number(v).toFixed(2)
+}
+
+function updateMeta(text) {
+    currentMetaText = text
+    document.getElementById('meta').innerText = text
+}
+
+function setHoverOhlcText(text) {
+    document.getElementById('hoverOhlc').innerText = text
+}
+
+function clearHoverOhlc() {
+    setHoverOhlcText('Hover a bar to see OHLC (TAIFEX +8)')
+}
+
+function extractCandleFromCrosshairParam(param) {
+    if (!param || !currentSeries) {
+        return null
+    }
+
+    var sd = param.seriesData
+    if (!sd) {
+        return null
+    }
+
+    var point = null
+
+    // v4/v5 typically expose seriesData as Map
+    if (typeof sd.get === 'function') {
+        point = sd.get(currentSeries)
+    }
+
+    // Fallback if a plain object is used
+    if (!point && typeof sd === 'object' && currentSeries) {
+        var key = String(currentSeries)
+        if (sd[key]) {
+            point = sd[key]
+        }
+    }
+
+    return point || null
+}
+
+function twLocalToUtcEpochSec(year, month, day, hh, mm) {
+    // Convert local TW(+8) wall-clock to UTC epoch seconds.
+    return Math.floor(Date.UTC(year, month - 1, day, hh - 8, mm, 0) / 1000)
+}
+
+function getTwYmd(epochSec) {
+    var d = new Date((epochSec + TAIFEX_OFFSET_SEC) * 1000)
+    return {
+        y: d.getUTCFullYear(),
+        m: d.getUTCMonth() + 1,
+        d: d.getUTCDate()
+    }
+}
+
+function ymdToSerial(y, m, d) {
+    return Math.floor(Date.UTC(y, m - 1, d) / 86400000)
+}
+
+function serialToYmd(serial) {
+    var dt = new Date(serial * 86400000)
+    return {
+        y: dt.getUTCFullYear(),
+        m: dt.getUTCMonth() + 1,
+        d: dt.getUTCDate()
+    }
+}
+
+function clearSessionLines() {
+    var overlay = document.getElementById('sessionOverlay')
+    if (overlay) {
+        overlay.innerHTML = ''
+    }
+}
+
+function renderSessionLines() {
+    if (!currentChart || !currentCandles || !currentCandles.length) {
+        clearSessionLines()
+        return
+    }
+
+    var overlay = document.getElementById('sessionOverlay')
+    if (!overlay) {
+        return
+    }
+    overlay.innerHTML = ''
+
+    var first = currentCandles[0].time
+    var last = currentCandles[currentCandles.length - 1].time
+    var firstYmd = getTwYmd(first)
+    var lastYmd = getTwYmd(last)
+    var startSerial = ymdToSerial(firstYmd.y, firstYmd.m, firstYmd.d) - 1
+    var endSerial = ymdToSerial(lastYmd.y, lastYmd.m, lastYmd.d) + 1
+
+    function mapBoundaryToVisibleBarTime(utcEpochSec) {
+        // timeToCoordinate may return null for timestamps not present on the time scale.
+        // Map to the first bar at/after the boundary so lines also work for aggregated frames.
+        for (var i = 0; i < currentCandles.length; i++) {
+            if (currentCandles[i].time >= utcEpochSec) {
+                return currentCandles[i].time
+            }
+        }
+        return null
+    }
+
+    function addBoundaryLine(utcEpochSec, cls) {
+        var mappedTime = mapBoundaryToVisibleBarTime(utcEpochSec)
+        if (mappedTime === null) {
+            return
+        }
+
+        var x = currentChart.timeScale().timeToCoordinate(mappedTime)
+        if (x === null || x === undefined) {
+            return
+        }
+        var width = overlay.clientWidth
+        if (x < -2 || x > width + 2) {
+            return
+        }
+        var line = document.createElement('div')
+        line.className = 'session-line ' + cls
+        line.style.left = Math.round(x) + 'px'
+        overlay.appendChild(line)
+    }
+
+    if (currentResolutionMin <= 30) {
+        for (var serial = startSerial; serial <= endSerial; serial++) {
+            var ymd = serialToYmd(serial)
+            // T session start: 08:45 (+8)
+            addBoundaryLine(twLocalToUtcEpochSec(ymd.y, ymd.m, ymd.d, 8, 45), 't')
+            // T+1 session start: 13:45 (+8)
+            addBoundaryLine(twLocalToUtcEpochSec(ymd.y, ymd.m, ymd.d, 13, 45), 't1')
+        }
+    } else if (currentResolutionMin === 1440) {
+        for (var i = 0; i < currentSwitchPoints.length; i++) {
+            addBoundaryLine(currentSwitchPoints[i], 'switch')
+        }
+    }
+}
+
+function setLoadingState(loading, message) {
+    var resolutionEl = document.getElementById('resolution')
+    var goLatestEl = document.getElementById('goLatestBtn')
+    var loadingEl = document.getElementById('loadingState')
+    if (resolutionEl) {
+        resolutionEl.disabled = loading
+    }
+    if (goLatestEl) {
+        goLatestEl.disabled = loading
+    }
+    if (loadingEl) {
+        loadingEl.style.display = loading ? 'inline' : 'none'
+        if (message) {
+            loadingEl.innerText = message
+        }
+    }
+}
+
+function qparam(name) {
+    var params = new URLSearchParams(window.location.search)
+    return params.get(name) || ''
+}
+
+function parseUtcTextToEpochSec(utcText) {
+    var d = new Date(utcText.replace(' ', 'T') + 'Z')
+    if (isNaN(d.getTime())) {
+        return 0
+    }
+    return Math.floor(d.getTime() / 1000)
+}
+
+function formatUtcTextFromEpochSec(epochSec) {
+    var d = new Date(epochSec * 1000)
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + ' ' +
+           pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + ':' + pad2(d.getUTCSeconds())
+}
+
+function resolutionLabel(minutes) {
+    if (minutes === 1440) {
+        return '1d'
+    }
+    return minutes + 'm'
+}
+
+function pad2(n) {
+    return n < 10 ? '0' + n : '' + n
+}
+
+function formatUtcPlus8(epochSec, withSeconds) {
+    var d = new Date((epochSec + TAIFEX_OFFSET_SEC) * 1000)
+    var y = d.getUTCFullYear()
+    var m = pad2(d.getUTCMonth() + 1)
+    var day = pad2(d.getUTCDate())
+    var hh = pad2(d.getUTCHours())
+    var mm = pad2(d.getUTCMinutes())
+    if (withSeconds) {
+        var ss = pad2(d.getUTCSeconds())
+        return y + '-' + m + '-' + day + ' ' + hh + ':' + mm + ':' + ss
+    }
+    return y + '-' + m + '-' + day + ' ' + hh + ':' + mm
+}
+
+function parseCsvToCandles(csvText) {
+    var lines = csvText.split(/\r?\n/)
+    var candles = []
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim()
+        if (!line || line.indexOf('YYYYMMDD,') === 0) {
+            continue
+        }
+        var parts = line.split(',')
+        if (parts.length < 7) {
+            continue
+        }
+
+        var d = parts[0]
+        var t = parts[1]
+        if (d.length !== 8 || t.length < 6) {
+            continue
+        }
+
+        var year = Number(d.slice(0, 4))
+        var month = Number(d.slice(4, 6)) - 1
+        var day = Number(d.slice(6, 8))
+        var hour = Number(t.slice(0, 2))
+        var minute = Number(t.slice(2, 4))
+        var second = Number(t.slice(4, 6))
+
+        candles.push({
+            time: Math.floor(Date.UTC(year, month, day, hour, minute, second) / 1000),
+            open: Number(parts[2]),
+            high: Number(parts[3]),
+            low: Number(parts[4]),
+            close: Number(parts[5])
+        })
+    }
+
+    candles.sort(function(a, b) { return a.time - b.time })
+    return candles
+}
+
+function aggregateCandles(candles, minutes) {
+    if (!candles || !candles.length) {
+        return []
+    }
+
+    var intervalSec = minutes * 60
+    var grouped = {}
+    var bucketKeys = []
+
+    for (var i = 0; i < candles.length; i++) {
+        var c = candles[i]
+        var bucket = Math.floor((c.time + TAIFEX_OFFSET_SEC) / intervalSec) * intervalSec - TAIFEX_OFFSET_SEC
+        if (!grouped[bucket]) {
+            grouped[bucket] = {
+                time: bucket,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close
+            }
+            bucketKeys.push(bucket)
+        } else {
+            var g = grouped[bucket]
+            if (c.high > g.high) g.high = c.high
+            if (c.low < g.low) g.low = c.low
+            g.close = c.close
+        }
+    }
+
+    bucketKeys.sort(function(a, b) { return a - b })
+    var out = []
+    for (var j = 0; j < bucketKeys.length; j++) {
+        out.push(grouped[bucketKeys[j]])
+    }
+    return out
+}
+
+function limitBars(candles, maxBars) {
+    if (!candles || candles.length <= maxBars) {
+        return candles
+    }
+    return candles.slice(candles.length - maxBars)
+}
+
+function fetchCsvRange(symbol, begUtc, endUtc) {
+    var url = '/cgi-bin/q1min.py?symbol=' + encodeURIComponent(symbol) +
+              '&BEG=' + encodeURIComponent(begUtc) +
+              '&END=' + encodeURIComponent(endUtc) +
+              '&csv=1'
+    return fetch(url)
+        .then(function(resp) {
+            if (!resp.ok) {
+                throw new Error('HTTP ' + resp.status)
+            }
+            return resp.text()
+        })
+        .then(function(csvText) {
+            return parseCsvToCandles(csvText)
+        })
+}
+
+function fetchSwitchPoints(symbol, begUtc, endUtc) {
+    var url = '/cgi-bin/qContinuousSwitchPoints.py?symbol=' + encodeURIComponent(symbol) +
+              '&BEG=' + encodeURIComponent(begUtc) +
+              '&END=' + encodeURIComponent(endUtc)
+    return fetch(url)
+        .then(function(resp) {
+            if (!resp.ok) {
+                throw new Error('HTTP ' + resp.status)
+            }
+            return resp.json()
+        })
+        .then(function(obj) {
+            var points = (obj && obj.switch_points) ? obj.switch_points : []
+            var out = []
+            for (var i = 0; i < points.length; i++) {
+                var p = points[i]
+                if (typeof p === 'string') {
+                    var secLegacy = parseUtcTextToEpochSec(p)
+                    if (secLegacy) {
+                        out.push({
+                            switch_utc: p,
+                            switch_epoch: secLegacy,
+                            before_symbol: '-',
+                            after_symbol: '-'
+                        })
+                    }
+                    continue
+                }
+
+                var sec = parseUtcTextToEpochSec(p.switch_utc)
+                if (sec) {
+                    out.push({
+                        switch_utc: p.switch_utc,
+                        switch_epoch: sec,
+                        before_symbol: p.before_symbol || '-',
+                        after_symbol: p.after_symbol || '-',
+                        before_close: p.before_close,
+                        after_open: p.after_open,
+                        gap: p.gap
+                    })
+                }
+            }
+            out.sort(function(a, b) { return b.switch_epoch - a.switch_epoch })
+            return out
+        })
+}
+
+function renderSwitchPointTable(symbol, switchPoints) {
+    var holder = document.getElementById('switchPointTable')
+    if (!holder) {
+        return
+    }
+
+    if (!switchPoints || !switchPoints.length) {
+        holder.innerHTML = 'No contract switch points found.'
+        return
+    }
+
+    var html = "<table>"
+    html += "<tr><th>#</th><th>Continuous Symbol</th><th>Before</th><th>After</th><th>Switch DateTime (+8)</th><th>Before Close</th><th>After Open</th><th>Gap</th></tr>"
+    for (var i = 0; i < switchPoints.length; i++) {
+        var row = switchPoints[i]
+        html += "<tr>"
+        html += "<td>" + (i + 1) + "</td>"
+        html += "<td>" + symbol + "</td>"
+        html += "<td>" + row.before_symbol + "</td>"
+        html += "<td>" + row.after_symbol + "</td>"
+        html += "<td>" + formatUtcPlus8(row.switch_epoch, true) + "</td>"
+        html += "<td>" + formatPrice(row.before_close) + "</td>"
+        html += "<td>" + formatPrice(row.after_open) + "</td>"
+        html += "<td>" + formatPrice(row.gap) + "</td>"
+        html += "</tr>"
+    }
+    html += "</table>"
+    holder.innerHTML = html
+}
+
+function fetchContinuousBounds(symbol) {
+    return fetch('/cgi-bin/qContinuousSymbolInfo.py')
+        .then(function(resp) {
+            if (!resp.ok) {
+                throw new Error('HTTP ' + resp.status)
+            }
+            return resp.json()
+        })
+        .then(function(obj) {
+            var rows = (obj && obj.symbols) ? obj.symbols : []
+            for (var i = 0; i < rows.length; i++) {
+                if ((rows[i].symbol || '').toUpperCase() === symbol.toUpperCase()) {
+                    return rows[i]
+                }
+            }
+            return null
+        })
+}
+
+function loadAllSwitchPointsTable(symbol) {
+    var holder = document.getElementById('switchPointTable')
+    if (holder) {
+        holder.innerHTML = 'Loading switch points...'
+    }
+
+    return fetchContinuousBounds(symbol)
+        .then(function(bounds) {
+            if (!bounds || !bounds.start || !bounds.end) {
+                renderSwitchPointTable(symbol, [])
+                return
+            }
+            return fetchSwitchPoints(symbol, bounds.start, bounds.end)
+                .then(function(points) {
+                    renderSwitchPointTable(symbol, points)
+                })
+        })
+        .catch(function(err) {
+            if (holder) {
+                holder.innerHTML = 'Failed to load switch points: ' + err.message
+            }
+        })
+}
+
+function loadCandlesForResolution(symbol, resolutionMin, endSec) {
+    var attempts = 0
+
+    function runAttempt(multiplier) {
+        var lookbackSec = Math.floor(MAX_BARS * resolutionMin * 60 * multiplier)
+        var begSec = endSec - lookbackSec
+        var begUtc = formatUtcTextFromEpochSec(begSec)
+        var endUtc = formatUtcTextFromEpochSec(endSec)
+
+        return fetchCsvRange(symbol, begUtc, endUtc)
+            .then(function(raw) {
+                var agg = aggregateCandles(raw, resolutionMin)
+                var capped = limitBars(agg, MAX_BARS)
+                if (capped.length >= MAX_BARS || attempts >= MAX_EXPAND_ATTEMPTS) {
+                    return {
+                        candles: capped,
+                        rangeBegUtc: begUtc,
+                        rangeEndUtc: endUtc
+                    }
+                }
+                attempts += 1
+                return runAttempt(multiplier * 2)
+            })
+    }
+
+    return runAttempt(LOOKBACK_FACTOR)
+}
+
+function renderChart(symbol, rangeBegUtc, rangeEndUtc, candles, resolutionMin, fitContent) {
+    var chartEl = document.getElementById('chart')
+    chartEl.innerHTML = ''
+
+    if (!window.LightweightCharts || typeof LightweightCharts.createChart !== 'function') {
+        throw new Error('Lightweight Charts library not loaded')
+    }
+
+    if (currentChart && typeof currentChart.remove === 'function') {
+        currentChart.remove()
+    }
+    visibleRangeSubscribed = false
+
+    var chart = LightweightCharts.createChart(chartEl, {
+        layout: {
+            background: { color: '#10151c' },
+            textColor: '#d7dde7'
+        },
+        rightPriceScale: {
+            borderColor: '#3a465b'
+        },
+        timeScale: {
+            borderColor: '#3a465b',
+            timeVisible: true,
+            secondsVisible: false,
+            tickMarkFormatter: function(time) {
+                return formatUtcPlus8(Number(time), false)
+            }
+        },
+        grid: {
+            vertLines: { color: '#1c2533' },
+            horzLines: { color: '#1c2533' }
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal
+        },
+        localization: {
+            timeFormatter: function(time) {
+                return formatUtcPlus8(Number(time), true)
+            }
+        }
+    })
+
+    var seriesOptions = {
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+        borderUpColor: '#26a69a',
+        borderDownColor: '#ef5350',
+        wickUpColor: '#26a69a',
+        wickDownColor: '#ef5350'
+    }
+
+    var series = null
+    if (typeof chart.addCandlestickSeries === 'function') {
+        // Lightweight Charts v4 API
+        series = chart.addCandlestickSeries(seriesOptions)
+    } else if (typeof chart.addSeries === 'function' && LightweightCharts.CandlestickSeries) {
+        // Lightweight Charts v5 API
+        series = chart.addSeries(LightweightCharts.CandlestickSeries, seriesOptions)
+    } else {
+        throw new Error('Unsupported Lightweight Charts API version')
+    }
+
+    series.setData(candles)
+    if (fitContent !== false) {
+        chart.timeScale().fitContent()
+    }
+    currentChart = chart
+    currentSeries = series
+    currentCandles = candles
+
+    updateMeta(
+        'Symbol: ' + symbol + ' | Resolution: ' + resolutionLabel(resolutionMin) + ' | Query Range(UTC): ' + rangeBegUtc + ' ~ ' + rangeEndUtc +
+        ' | Display TZ: UTC+8 (TAIFEX) | Bars: ' + candles.length + ' (max 300)'
+    )
+    clearHoverOhlc()
+
+    window.addEventListener('resize', function() {
+        chart.applyOptions({ width: chartEl.clientWidth })
+        requestAnimationFrame(renderSessionLines)
+    })
+    chart.applyOptions({ width: chartEl.clientWidth })
+    requestAnimationFrame(renderSessionLines)
+
+    // Lazy-load older window when user pans near left edge.
+    if (!visibleRangeSubscribed) {
+        chart.timeScale().subscribeVisibleLogicalRangeChange(function(logicalRange) {
+            requestAnimationFrame(renderSessionLines)
+            if (!logicalRange || isLoadingOlder || isLoadingNewer || !currentCandles.length) {
+                return
+            }
+
+            // Prevent loop on initial fitContent render.
+            // Only load older data when user has panned left far enough:
+            // 1) left edge is near the beginning, and
+            // 2) right edge is no longer near the latest bar.
+            if (logicalRange.from > LAZY_LEFT_EDGE_THRESHOLD) {
+                // Near right edge and not on latest window => page newer.
+                if (
+                    logicalRange.to >= (currentCandles.length - 1 - LAZY_RIGHT_GAP_THRESHOLD) &&
+                    currentEndSec < latestEndSec
+                ) {
+                    loadNewerWindow()
+                }
+                return
+            }
+            if (logicalRange.to >= (currentCandles.length - 1 - LAZY_RIGHT_GAP_THRESHOLD)) {
+                return
+            }
+            loadOlderWindow()
+        })
+        if (typeof chart.timeScale().subscribeVisibleTimeRangeChange === 'function') {
+            chart.timeScale().subscribeVisibleTimeRangeChange(function() {
+                requestAnimationFrame(renderSessionLines)
+            })
+        }
+
+        chart.subscribeCrosshairMove(function(param) {
+            var candle = extractCandleFromCrosshairParam(param)
+            if (!candle) {
+                clearHoverOhlc()
+                return
+            }
+
+            var t = (candle.time !== undefined && candle.time !== null) ? candle.time : param.time
+            if (t === undefined || t === null) {
+                clearHoverOhlc()
+                return
+            }
+
+            var timeSec = Number(t)
+            if (isNaN(timeSec)) {
+                clearHoverOhlc()
+                return
+            }
+
+            setHoverOhlcText(
+                'Hover OHLC | Time(+8): ' + formatUtcPlus8(timeSec, true) +
+                ' | O: ' + formatPrice(candle.open) +
+                ' H: ' + formatPrice(candle.high) +
+                ' L: ' + formatPrice(candle.low) +
+                ' C: ' + formatPrice(candle.close)
+            )
+        })
+        visibleRangeSubscribed = true
+    }
+}
+
+function loadAndRenderWindow(fitContent) {
+    setLoadingState(true, 'Reloading chart data...')
+    document.getElementById('err').innerText = ''
+    return loadCandlesForResolution(currentSymbol, currentResolutionMin, currentEndSec)
+        .then(function(result) {
+            if (!result.candles.length) {
+                document.getElementById('err').innerText = 'No bar data in selected range.'
+                updateMeta('Symbol: ' + currentSymbol + ' | No data')
+                clearHoverOhlc()
+                setLoadingState(false)
+                return
+            }
+            var switchPointsPromise = Promise.resolve([])
+            if (currentResolutionMin === 1440) {
+                switchPointsPromise = fetchSwitchPoints(currentSymbol, result.rangeBegUtc, result.rangeEndUtc)
+            }
+
+            return switchPointsPromise
+                .catch(function() {
+                    return []
+                })
+                .then(function(points) {
+                    currentSwitchPoints = []
+                    for (var i = 0; i < points.length; i++) {
+                        currentSwitchPoints.push(points[i].switch_epoch)
+                    }
+                    renderChart(
+                        currentSymbol,
+                        result.rangeBegUtc,
+                        result.rangeEndUtc,
+                        result.candles,
+                        currentResolutionMin,
+                        fitContent
+                    )
+                    setLoadingState(false)
+                })
+        })
+        .catch(function(err) {
+            setLoadingState(false)
+            throw err
+        })
+}
+
+function loadOlderWindow() {
+    if (!currentCandles.length) {
+        return
+    }
+    isLoadingOlder = true
+    var previousFirst = currentCandles[0].time
+    currentEndSec = previousFirst - currentResolutionMin * 60
+
+    setLoadingState(true, 'Loading older data...')
+    loadAndRenderWindow(true)
+        .then(function() {
+            isLoadingOlder = false
+            setLoadingState(false)
+        })
+        .catch(function(err) {
+            document.getElementById('err').innerText = 'Lazy load failed: ' + err.message
+            isLoadingOlder = false
+            setLoadingState(false)
+        })
+}
+
+function loadNewerWindow() {
+    if (!currentCandles.length || currentEndSec >= latestEndSec) {
+        return
+    }
+
+    isLoadingNewer = true
+
+    // Move forward by roughly one window with slight overlap.
+    var stepSec = Math.max(1, Math.floor(MAX_BARS * currentResolutionMin * 60 * 0.9))
+    currentEndSec = Math.min(latestEndSec, currentEndSec + stepSec)
+
+    setLoadingState(true, 'Loading newer data...')
+    loadAndRenderWindow(true)
+        .then(function() {
+            isLoadingNewer = false
+            setLoadingState(false)
+        })
+        .catch(function(err) {
+            document.getElementById('err').innerText = 'Lazy load failed: ' + err.message
+            isLoadingNewer = false
+            setLoadingState(false)
+        })
+}
+
+function goLatestWindow() {
+    if (isLoadingOlder || isLoadingNewer) {
+        return
+    }
+    currentEndSec = latestEndSec
+    loadAndRenderWindow(true)
+        .catch(function(err) {
+            document.getElementById('err').innerText = 'Load chart data failed: ' + err.message
+            updateMeta('Failed to load chart')
+            clearHoverOhlc()
+        })
+}
+
+function main() {
+    var symbol = qparam('symbol')
+    var end = qparam('END')
+
+    if (!symbol || !end) {
+        document.getElementById('err').innerText = 'Missing symbol/END query parameters.'
+        updateMeta('Failed to load chart')
+        clearHoverOhlc()
+        return
+    }
+
+    currentSymbol = symbol
+    currentEndSec = parseUtcTextToEpochSec(end)
+    latestEndSec = currentEndSec
+    if (!currentEndSec) {
+        document.getElementById('err').innerText = 'Invalid END query parameter.'
+        updateMeta('Failed to load chart')
+        clearHoverOhlc()
+        return
+    }
+
+    function rerenderForResolution() {
+        currentResolutionMin = Number(document.getElementById('resolution').value)
+        currentEndSec = latestEndSec
+        loadAndRenderWindow(true)
+            .catch(function(err) {
+                document.getElementById('err').innerText = 'Load chart data failed: ' + err.message
+                updateMeta('Failed to load chart')
+                clearHoverOhlc()
+            })
+    }
+
+    document.getElementById('resolution').addEventListener('change', rerenderForResolution)
+    document.getElementById('goLatestBtn').addEventListener('click', goLatestWindow)
+    loadAllSwitchPointsTable(symbol)
+    rerenderForResolution()
+}
+
+main()
+</script>
+</body>
+</html>

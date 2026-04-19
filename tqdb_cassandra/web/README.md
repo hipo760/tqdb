@@ -10,6 +10,10 @@ Containerized web interface for TQDB (Time-series Quote Database) financial data
 - **Timezone**: UTC
 - **Status**: ✅ Production Ready
 
+## 📘 Feature Docs
+
+- `CONTINUOUS_SYMBOLS.md` - TXDT/TXON continuous futures design, API, and operations
+
 ## 📁 Directory Structure
 
 ```

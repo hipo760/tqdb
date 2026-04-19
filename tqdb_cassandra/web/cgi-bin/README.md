@@ -14,6 +14,7 @@ Python CGI endpoints for the TQDB web interface (18 scripts).
 - `q1sec.py` - Query second bars
 - `q1day.py` - Query daily bars (aggregated from minutes)
 - `qRange.py` - Query available date ranges
+- `qContinuousSymbolInfo.py` - Query TXDT/TXON available ranges
 
 ## Data Import
 - `i1min_check.py` - Generate import commands
@@ -29,6 +30,11 @@ Python CGI endpoints for the TQDB web interface (18 scripts).
 - `qSupportTZ.py` - List available timezones (484 zones)
 - `webcommon.py` - Common utility functions
 - `cassandra_query.py` - Cassandra query helpers
+- `continuous_symbols.py` - Continuous symbol composition logic for TXDT/TXON
+
+## Related Docs
+
+- `../CONTINUOUS_SYMBOLS.md` - Continuous futures symbol behavior and operations
 
 ## Environment Variables
 
