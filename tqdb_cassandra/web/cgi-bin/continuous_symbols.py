@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Continuous TAIFEX symbols (TXDT/TXON) built on read-time composition.
+"""Continuous symbols (TXDT/TXON plus CME DT/ON symbols) built on read-time composition.
 
 This module keeps schedule logic in one place so endpoints can:
-- compose minute bars for TXDT/TXON at query time (view-like behavior)
+- compose minute bars for continuous symbols at query time (view-like behavior)
 - report available range for UI pages
 """
 
@@ -10,15 +10,23 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 
-CONTINUOUS_SYMBOLS = {"TXDT", "TXON"}
+CONTINUOUS_SYMBOLS = {"TXDT", "TXON", "NQDT", "NQON", "ESDT", "ESON", "YMDT", "YMON"}
+TAIFEX_SYMBOLS = {"TXDT", "TXON"}
+CME_DT_SYMBOLS = {"NQDT", "ESDT", "YMDT"}
+CME_ON_SYMBOLS = {"NQON", "ESON", "YMON"}
+CME_SYMBOLS = CME_DT_SYMBOLS | CME_ON_SYMBOLS
 MONTH_CODES = "ABCDEFGHIJKL"
+FUTURES_MONTH_CODES = "FGHJKMNQUVXZ"
 TXF_PREFIX = "TXF"
+CME_PRODUCT_CODES = {"NQ": "NQ", "ES": "ES", "YM": "YM"}
 
 
 def _contract_month_to_taifex_symbol(contract_month: str) -> str:
@@ -26,11 +34,47 @@ def _contract_month_to_taifex_symbol(contract_month: str) -> str:
     year = int(contract_month[:4])
     month = int(contract_month[4:6])
     return f"{TXF_PREFIX}{MONTH_CODES[month - 1]}{year % 10}"
+
+
+def _continuous_to_cme_product(symbol: str) -> str:
+    normalized = normalize_symbol(symbol)
+    if normalized in CME_SYMBOLS:
+        return normalized[:2]
+    raise ValueError(f"Unsupported CME continuous symbol: {symbol}")
+
+
+def _contract_month_to_cme_symbol(product: str, contract_month: str) -> str:
+    """Convert YYYYMM to CME futures symbol, e.g. ('NQ','202606') -> 'NQM6'."""
+    product = product.upper()
+    if product not in CME_PRODUCT_CODES:
+        raise ValueError(f"Unsupported CME product: {product}")
+    year = int(contract_month[:4])
+    month = int(contract_month[4:6])
+    return f"{CME_PRODUCT_CODES[product]}{FUTURES_MONTH_CODES[month - 1]}{year % 10}"
+
+
+def _family_for_symbol(symbol: str) -> str:
+    normalized = normalize_symbol(symbol)
+    if normalized in TAIFEX_SYMBOLS:
+        return "TAIFEX"
+    if normalized in CME_SYMBOLS:
+        return "CME"
+    raise ValueError(f"Unsupported continuous symbol: {symbol}")
+
+
 YMD_RE = re.compile(r"^(\d{8})$")
 TW_TZ = timezone(timedelta(hours=8))
 UTC_TZ = timezone.utc
+try:
+    CHICAGO_TZ = ZoneInfo("America/Chicago")
+except Exception:
+    CHICAGO_TZ = timezone(timedelta(hours=-6))
+
 TXDT_SESSION_BEGIN = time(8, 45)
 TXDT_SESSION_END = time(13, 45)
+CME_DT_SESSION_BEGIN = time(8, 30)
+CME_DT_SESSION_END = time(15, 15)
+_CME_LAST_TRADE_CACHE: dict[str, dict[str, date]] = {}
 
 
 @dataclass(frozen=True)
@@ -74,7 +118,102 @@ def _parse_date_flexible(text: str) -> date | None:
     return None
 
 
-def _resolve_holiday_csv_path() -> Path:
+def _resolve_cme_last_trade_csv_path(product: str) -> Path:
+    product = product.upper()
+    env_path = os.environ.get(f"CME_{product}_LAST_TRADE_CSV")
+    if env_path:
+        candidate = Path(env_path)
+        if candidate.exists():
+            return candidate
+
+    candidates = [
+        Path(__file__).resolve().parents[1] / "data" / "CME" / f"{product}_last_trade_datetime.csv",
+        Path(__file__).resolve().parents[2] / "web" / "data" / "CME" / f"{product}_last_trade_datetime.csv",
+        Path(f"/opt/tqdb/web/data/CME/{product}_last_trade_datetime.csv"),
+        Path(f"/var/www/data/CME/{product}_last_trade_datetime.csv"),
+        Path(f"/tqdb/tqdb_cassandra/web/data/CME/{product}_last_trade_datetime.csv"),
+        Path(f"./web/data/CME/{product}_last_trade_datetime.csv"),
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    raise FileNotFoundError(
+        f"CME {product} last-trade CSV not found. Searched: {', '.join(str(c) for c in candidates)}. "
+        f"Set CME_{product}_LAST_TRADE_CSV env var or ensure file exists."
+    )
+
+
+def _parse_datetime_text_flexible(text: str) -> datetime | None:
+    value = (text or "").strip()
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _load_cme_last_trade_dates(product: str) -> dict[str, date]:
+    product = product.upper()
+    if product in _CME_LAST_TRADE_CACHE:
+        return _CME_LAST_TRADE_CACHE[product]
+
+    csv_path = _resolve_cme_last_trade_csv_path(product)
+    rows = csv_path.read_text(encoding="utf-8").splitlines()
+    out: dict[str, date] = {}
+
+    for line in rows:
+        row = line.strip()
+        if not row or row.startswith("#"):
+            continue
+
+        parts = [part.strip() for part in row.split(",")]
+        if len(parts) < 2:
+            continue
+        if parts[0].lower() == "symbol":
+            continue
+
+        sym = parts[0].upper()
+        dt = _parse_datetime_text_flexible(parts[1])
+        if not sym or dt is None:
+            continue
+        out[sym] = dt.date()
+
+    _CME_LAST_TRADE_CACHE[product] = out
+    return out
+
+
+def _resolve_holiday_csv_path(symbol: str | None = None) -> Path:
+    family = _family_for_symbol(symbol or "TXDT")
+
+    if family == "CME":
+        env_path = os.environ.get("CME_HOLIDAY_CSV")
+        if env_path:
+            candidate = Path(env_path)
+            if candidate.exists():
+                return candidate
+
+        candidates = [
+            Path(__file__).resolve().parents[2] / "feature-custom-symbol" / "CME" / "cme_holidays_sample.csv",
+            Path("/opt/tqdb/feature-custom-symbol/CME/cme_holidays_sample.csv"),
+            Path("/tqdb/feature-custom-symbol/CME/cme_holidays_sample.csv"),
+            Path("./feature-custom-symbol/CME/cme_holidays_sample.csv"),
+            Path("../../../feature-custom-symbol/CME/cme_holidays_sample.csv"),
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        raise FileNotFoundError(
+            f"CME holiday CSV not found. Searched: {', '.join(str(c) for c in candidates)}. "
+            f"Set CME_HOLIDAY_CSV env var or ensure file exists."
+        )
+
     env_path = os.environ.get("TAIFEX_HOLIDAY_CSV")
     if env_path:
         candidate = Path(env_path)
@@ -94,13 +233,13 @@ def _resolve_holiday_csv_path() -> Path:
             return candidate
 
     raise FileNotFoundError(
-        f"Holiday CSV not found. Searched: {', '.join(str(c) for c in candidates)}. "
+        f"TAIFEX holiday CSV not found. Searched: {', '.join(str(c) for c in candidates)}. "
         f"Set TAIFEX_HOLIDAY_CSV env var or ensure file exists."
     )
 
 
-def load_holiday_dates() -> set[date]:
-    csv_path = _resolve_holiday_csv_path()
+def load_holiday_dates(symbol: str | None = None) -> set[date]:
+    csv_path = _resolve_holiday_csv_path(symbol)
     content = csv_path.read_text(encoding="utf-8").splitlines()
 
     holiday_dates: set[date] = set()
@@ -132,26 +271,62 @@ def _adjust_to_next_trading_day(candidate: date, holidays: set[date]) -> date:
     return day
 
 
-def _estimate_last_trading_day(contract_month: str, holidays: set[date]) -> date:
+def _adjust_to_prev_trading_day(candidate: date, holidays: set[date]) -> date:
+    day = candidate
+    while day.weekday() >= 5 or day in holidays:
+        day -= timedelta(days=1)
+    return day
+
+
+def _estimate_last_trading_day(symbol: str, contract_month: str, holidays: set[date]) -> date:
+    family = _family_for_symbol(symbol)
     year = int(contract_month[:4])
     month = int(contract_month[4:6])
-    third_wed = _third_weekday_of_month(year, month, 2)
-    return _adjust_to_next_trading_day(third_wed, holidays)
+    if family == "TAIFEX":
+        third_wed = _third_weekday_of_month(year, month, 2)
+        return _adjust_to_next_trading_day(third_wed, holidays)
+
+    # CME products: prefer configured exchange last-trade date from CSV.
+    product = _continuous_to_cme_product(symbol)
+    cme_symbol = _contract_month_to_cme_symbol(product, contract_month)
+    last_trade_map = _load_cme_last_trade_dates(product)
+    if cme_symbol in last_trade_map:
+        return last_trade_map[cme_symbol]
+
+    # Fallback when CSV entry is missing.
+    third_fri = _third_weekday_of_month(year, month, 4)
+    fallback = _adjust_to_prev_trading_day(third_fri, holidays)
+    print(
+        f"Warning: Missing last-trade date for {cme_symbol} in CME CSV, using fallback={fallback}",
+        file=sys.stderr,
+    )
+    return fallback
 
 
-def _contract_months_for_range(begin_dt: datetime, end_dt: datetime) -> Iterable[str]:
+def _switch_day_for_symbol(symbol: str, last_trading_day: date) -> date:
+    symbol = normalize_symbol(symbol)
+    if symbol in CME_DT_SYMBOLS:
+        return last_trading_day - timedelta(days=2)
+    return last_trading_day
+
+
+def _contract_months_for_range(symbol: str, begin_dt: datetime, end_dt: datetime) -> Iterable[str]:
+    family = _family_for_symbol(symbol)
     start_year = begin_dt.year - 1
     end_year = end_dt.year + 1
 
     for year in range(start_year, end_year + 1):
-        for month in range(1, 13):
+        months = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+        if family == "CME":
+            months = (3, 6, 9, 12)
+        for month in months:
             yield f"{year}{month:02d}"
 
 
-def _utc_naive_from_tw(day: date, hhmm: str) -> datetime:
+def _utc_naive_from_local(day: date, hhmm: str, tzinfo) -> datetime:
     hour = int(hhmm[:2])
     minute = int(hhmm[2:])
-    local_dt = datetime(day.year, day.month, day.day, hour, minute, tzinfo=TW_TZ)
+    local_dt = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tzinfo)
     utc_dt = local_dt.astimezone(UTC_TZ)
     return utc_dt.replace(tzinfo=None)
 
@@ -161,13 +336,32 @@ def _build_segments(symbol: str, begin_dt: datetime, end_dt: datetime, holidays:
     if symbol not in CONTINUOUS_SYMBOLS:
         return []
 
-    # TXDT switches at last trading day 08:45 local.
-    # TXON keeps 13:45 in old contract and starts new contract at 13:46.
-    start_hhmm = "0845" if symbol == "TXDT" else "1346"
+    if symbol == "TXDT":
+        start_hhmm = "0845"
+        end_hhmm = "0845"
+        end_offset_min = -1
+        local_tz = TW_TZ
+    elif symbol == "TXON":
+        start_hhmm = "1346"
+        end_hhmm = "1345"
+        end_offset_min = 0
+        local_tz = TW_TZ
+    elif symbol in CME_DT_SYMBOLS:
+        start_hhmm = "0830"
+        end_hhmm = "0830"
+        end_offset_min = -1
+        local_tz = CHICAGO_TZ
+    elif symbol in CME_ON_SYMBOLS:
+        start_hhmm = "1516"
+        end_hhmm = "1515"
+        end_offset_min = 0
+        local_tz = CHICAGO_TZ
+    else:
+        return []
 
     contracts: list[tuple[str, date]] = []
-    for contract_month in _contract_months_for_range(begin_dt, end_dt):
-        contracts.append((contract_month, _estimate_last_trading_day(contract_month, holidays)))
+    for contract_month in _contract_months_for_range(symbol, begin_dt, end_dt):
+        contracts.append((contract_month, _estimate_last_trading_day(symbol, contract_month, holidays)))
 
     contracts.sort(key=lambda item: item[0])
 
@@ -176,20 +370,25 @@ def _build_segments(symbol: str, begin_dt: datetime, end_dt: datetime, holidays:
 
     for idx, (contract_month, last_trading_day) in enumerate(contracts):
         prev_last_trading_day = contracts[idx - 1][1] if idx > 0 else window_start
-        seg_start = _utc_naive_from_tw(prev_last_trading_day, start_hhmm)
-        if symbol == "TXDT":
-            # Ensure exact handover at 08:45: previous contract ends at 08:44.
-            seg_end = _utc_naive_from_tw(last_trading_day, "0845") - timedelta(minutes=1)
+        prev_switch_day = _switch_day_for_symbol(symbol, prev_last_trading_day)
+        curr_switch_day = _switch_day_for_symbol(symbol, last_trading_day)
+
+        seg_start = _utc_naive_from_local(prev_switch_day, start_hhmm, local_tz)
+        seg_end = _utc_naive_from_local(curr_switch_day, end_hhmm, local_tz)
+        if end_offset_min:
+            seg_end = seg_end + timedelta(minutes=end_offset_min)
+
+        if symbol in TAIFEX_SYMBOLS:
+            mapped_symbol = _contract_month_to_taifex_symbol(contract_month)
         else:
-            # TXON old contract includes 13:45; new contract begins at 13:46.
-            seg_end = _utc_naive_from_tw(last_trading_day, "1345")
+            mapped_symbol = _contract_month_to_cme_symbol(_continuous_to_cme_product(symbol), contract_month)
 
         if seg_end < begin_dt or seg_start > end_dt:
             continue
 
         segments.append(
             Segment(
-                tc_symbol=_contract_month_to_taifex_symbol(contract_month),
+                tc_symbol=mapped_symbol,
                 start_utc=seg_start,
                 end_utc=seg_end,
             )
@@ -206,11 +405,20 @@ def _query_minbar_rows(session, keyspace: str, symbol: str, begin_dt: datetime, 
     return session.execute(query, [symbol, begin_dt, end_dt], timeout=None)
 
 
-def _is_txdt_session_bar(dt_utc_naive: datetime) -> bool:
-    """True if UTC-naive bar datetime is inside TXDT day session in Taiwan time."""
-    dt_tw = dt_utc_naive.replace(tzinfo=UTC_TZ).astimezone(TW_TZ)
-    local_t = dt_tw.timetz().replace(tzinfo=None)
-    return TXDT_SESSION_BEGIN <= local_t <= TXDT_SESSION_END
+def _is_dt_session_bar(symbol: str, dt_utc_naive: datetime) -> bool:
+    """True if UTC-naive bar datetime is inside DT session for target symbol."""
+    symbol = normalize_symbol(symbol)
+    if symbol == "TXDT":
+        dt_local = dt_utc_naive.replace(tzinfo=UTC_TZ).astimezone(TW_TZ)
+        local_t = dt_local.timetz().replace(tzinfo=None)
+        return TXDT_SESSION_BEGIN <= local_t <= TXDT_SESSION_END
+
+    if symbol in CME_DT_SYMBOLS:
+        dt_local = dt_utc_naive.replace(tzinfo=UTC_TZ).astimezone(CHICAGO_TZ)
+        local_t = dt_local.timetz().replace(tzinfo=None)
+        return CME_DT_SESSION_BEGIN <= local_t <= CME_DT_SESSION_END
+
+    return True
 
 
 def _shift_price(v: object, shift: object) -> object:
@@ -240,7 +448,7 @@ def compose_continuous_minbars(
         seg_rows: list[tuple[datetime, object, object, object, object, object]] = []
         rows = _query_minbar_rows(session, keyspace, seg.tc_symbol, query_begin, query_end)
         for row in rows:
-            if symbol == "TXDT" and not _is_txdt_session_bar(row.datetime):
+            if symbol in (TAIFEX_SYMBOLS | CME_DT_SYMBOLS) and not _is_dt_session_bar(symbol, row.datetime):
                 continue
             seg_rows.append((row.datetime, row.open, row.high, row.low, row.close, getattr(row, "vol", 0)))
         segment_bars.append(seg_rows)
@@ -375,20 +583,33 @@ def discover_contract_switch_points(
     begin_dt: datetime,
     end_dt: datetime,
 ) -> list[dict[str, str]]:
-    """Return contract switch rows in UTC for TXDT/TXON within [begin_dt, end_dt]."""
+    """Return contract switch rows in UTC for continuous symbols within [begin_dt, end_dt]."""
     symbol = normalize_symbol(symbol)
     if symbol not in CONTINUOUS_SYMBOLS:
         raise ValueError(f"Unsupported continuous symbol: {symbol}")
 
-    switch_hhmm = "0845" if symbol == "TXDT" else "1346"
+    if symbol == "TXDT":
+        switch_hhmm = "0845"
+        local_tz = TW_TZ
+    elif symbol == "TXON":
+        switch_hhmm = "1346"
+        local_tz = TW_TZ
+    elif symbol in CME_DT_SYMBOLS:
+        switch_hhmm = "0830"
+        local_tz = CHICAGO_TZ
+    elif symbol in CME_ON_SYMBOLS:
+        switch_hhmm = "1516"
+        local_tz = CHICAGO_TZ
+    else:
+        raise ValueError(f"Unsupported continuous symbol: {symbol}")
 
     # Add year buffers to ensure adjacent contract switch points are available.
     scan_begin = datetime(begin_dt.year - 1, 1, 1, 0, 0, 0)
     scan_end = datetime(end_dt.year + 1, 12, 31, 23, 59, 59)
 
     contracts: list[tuple[str, date]] = []
-    for contract_month in _contract_months_for_range(scan_begin, scan_end):
-        contracts.append((contract_month, _estimate_last_trading_day(contract_month, holidays)))
+    for contract_month in _contract_months_for_range(symbol, scan_begin, scan_end):
+        contracts.append((contract_month, _estimate_last_trading_day(symbol, contract_month, holidays)))
 
     contracts.sort(key=lambda item: item[0])
 
@@ -397,13 +618,22 @@ def discover_contract_switch_points(
         prev_contract_month = contracts[idx - 1][0]
         prev_last_trading_day = contracts[idx - 1][1]
         next_contract_month = contracts[idx][0]
-        switch_dt = _utc_naive_from_tw(prev_last_trading_day, switch_hhmm)
+        switch_day = _switch_day_for_symbol(symbol, prev_last_trading_day)
+        switch_dt = _utc_naive_from_local(switch_day, switch_hhmm, local_tz)
         if begin_dt <= switch_dt <= end_dt:
+            if symbol in TAIFEX_SYMBOLS:
+                before_symbol = _contract_month_to_taifex_symbol(prev_contract_month)
+                after_symbol = _contract_month_to_taifex_symbol(next_contract_month)
+            else:
+                product = _continuous_to_cme_product(symbol)
+                before_symbol = _contract_month_to_cme_symbol(product, prev_contract_month)
+                after_symbol = _contract_month_to_cme_symbol(product, next_contract_month)
+
             points.append(
                 {
                     "switch_utc": switch_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    "before_symbol": _contract_month_to_taifex_symbol(prev_contract_month),
-                    "after_symbol": _contract_month_to_taifex_symbol(next_contract_month),
+                    "before_symbol": before_symbol,
+                    "after_symbol": after_symbol,
                 }
             )
 

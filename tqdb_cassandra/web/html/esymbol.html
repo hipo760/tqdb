@@ -73,6 +73,54 @@ function doModify(idx, sym){
  window.open('/edata.html?sym='+escape(sym)+'&_T=0', "_blank", "");
 }
 
+var deleteTargetSymbol = ''
+
+function openDeleteDialog(sym){
+    deleteTargetSymbol = sym || ''
+    if (!deleteTargetSymbol) {
+        return
+    }
+    document.getElementById('deleteTargetSym').innerText = deleteTargetSymbol
+    document.getElementById('chkDeleteSymbolTable').checked = false
+    $('#deleteConfirmModal').show()
+}
+
+function closeDeleteDialog(){
+    $('#deleteConfirmModal').hide()
+    deleteTargetSymbol = ''
+}
+
+function confirmDeleteSymbol(){
+    var sym = deleteTargetSymbol
+    if (!sym) {
+        closeDeleteDialog()
+        return
+    }
+    var includeSymbolTable = document.getElementById('chkDeleteSymbolTable').checked ? 1 : 0
+
+    DoAjax('/cgi-bin/dsymbol.py', { sym: sym, deleteSymbolTable: includeSymbolTable },
+        function(data, textStatus, jqXHR){
+            if (data && data.status === 'ok') {
+                alert('Deleted data for symbol: ' + sym)
+                closeDeleteDialog()
+                qSymInfo()
+                return
+            }
+            alert('Delete failed: ' + ((data && data.error) ? data.error : 'Unknown error'))
+        },
+        function(jqXHR, textStatus, errorThrown){
+            alert('Delete failed: ' + textStatus)
+        }
+    )
+}
+
+function doDeleteSymbol(idx, sym){
+    if (!sym || sym.length === 0) {
+        return;
+    }
+    openDeleteDialog(sym)
+}
+
 function strQDay(datetime){
     var dd = datetime.getDate();
     var mm = datetime.getMonth()+1; //January is 0!
@@ -169,42 +217,28 @@ function renderMainTable()
     var end = Math.min(start + pageSize, totalCount)
 
     var strTable="<table>"
-    strTable+="<tr class='grayThing smallfont'><td rowspan=2>#</td><td rowspan=2>Symbol&nbsp;<input type='button' value='New' onclick='$(\"#newSymModal\").show();'/></td><td colspan=6>Symbol Settings</td></tr>"
-    strTable+="<tr class='grayThing smallfont'><td>Desc.</td><td>BigPoint<br>Value</td><td>MarketOpen<br>(HHmmSS)</td><td>MarketClose<br>(HHmmSS)</td><td>Store<br>Sec</td></tr>"
+    strTable+="<tr class='grayThing smallfont'><td>#</td><td>Symbol&nbsp;<input type='button' value='New' onclick='$(\"#newSymModal\").show();'/></td><td>Actions</td></tr>"
 
     for (var row = start; row < end; ++row)
     {
         var idx = filteredSymIndexes[row]
         var sym = allSymInfo[idx]
         var symbol = sym['symbol']
-        var bpv = ''
-        var desc = ''
-        var mko = ''
-        var mkc = ''
-        var storesec_checked = ''
-        if ('keyval' in sym)
-        {
-            if ('BPV' in sym['keyval']) bpv = sym['keyval']['BPV'];
-            if ('DESC' in sym['keyval']) desc = sym['keyval']['DESC'];
-            if ('MKO' in sym['keyval']) mko = sym['keyval']['MKO'];
-            if ('MKC' in sym['keyval']) mkc = sym['keyval']['MKC'];
-            if ('SSEC' in sym['keyval'] && 1 == sym['keyval']['SSEC'])
-                storesec_checked = 'Yes';
-            try{desc=decodeURI(desc)}catch(e){}
-        }
-        strTable+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\" onclick=\"showDlg("+idx+");\" >"
+        strTable+="<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\">"
         strTable+="<td>"+(row+1)+"</td>"
         strTable+="<td>"+symbol+"</td>"
-        strTable+="<td>"+desc+"</td>"
-        strTable+="<td>"+bpv+"</td>"
-        strTable+="<td>"+mko+"</td>"
-        strTable+="<td>"+mkc+"</td>"
-        strTable+="<td>"+storesec_checked+"</td>"
+        strTable+="<td>"
+        strTable+="<button type='button' onclick=\"dosummery("+idx+", '"+symbol+"')\">Summary</button>&nbsp;"
+        strTable+="<button type='button' onclick=\"doq1min("+idx+", '"+symbol+"')\">Query 1Min</button>&nbsp;"
+        strTable+="<button type='button' onclick=\"doimport1min("+idx+", '"+symbol+"')\">Import 1Min</button>&nbsp;"
+        strTable+="<button type='button' onclick=\"doModify("+idx+", '"+symbol+"')\">Modify Data</button>&nbsp;"
+        strTable+="<button type='button' onclick=\"doDeleteSymbol("+idx+", '"+symbol+"')\">Delete All Data</button>"
+        strTable+="</td>"
         strTable+="</tr>"
     }
 
     if (totalCount === 0) {
-        strTable += "<tr><td colspan='7'>No symbols found</td></tr>"
+        strTable += "<tr><td colspan='3'>No symbols found</td></tr>"
     }
 
     strTable+="</table>"
@@ -220,7 +254,7 @@ function renderMainTable()
 </script>
 <body onload='qSymInfo();'>
 <div style='margin-bottom: 10px;'>
-    <a href='/esymbol.html'><button type='button'>TAIFEX</button></a>
+    <a href='/esymbol.html'><button type='button'>All Symbols</button></a>
     <a href='/csymbol.html'><button type='button'>Continuous</button></a>
 </div>
 <hr>
@@ -229,6 +263,28 @@ function renderMainTable()
     <button type='button' onclick='document.getElementById("symbolFilter").value=""; onFilterChange();'>Clear</button>
 </div>
 <div id='symbolTableDiv'></div>
+<div id="deleteConfirmModal" class='modal' style="display: none;">
+  <div class="modal-content">
+    <span class="close" onclick="closeDeleteDialog();">x</span>
+    <p>
+        <table>
+            <tr class='grayThing smallfont'><td colspan=2>Confirm Delete Symbol Data</td></tr>
+            <tr><td>Symbol</td><td><b id='deleteTargetSym'></b></td></tr>
+            <tr><td colspan=2>
+                <label>
+                    <input type='checkbox' id='chkDeleteSymbolTable'>
+                    Also delete from symbol table
+                </label>
+            </td></tr>
+            <tr><td colspan=2 style='color:#b22222;'>This action cannot be undone.</td></tr>
+            <tr><td>Actions</td><td>
+                <button type='button' onclick='confirmDeleteSymbol();'>Confirm Delete</button>
+                <button type='button' onclick='closeDeleteDialog();'>Cancel</button>
+            </td></tr>
+        </table>
+    </p>
+  </div>
+</div>
 <div id="newSymModal" class='modal' style="display: none;">
   <!-- Modal content -->
   <div class="modal-content">
@@ -266,6 +322,7 @@ function renderMainTable()
 		<tr><td>Modify</td><td>
 			<button type='button' value='' onclick="doimport1min($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Import 1Min</button>&nbsp;
                         <button type='button' value='' onclick="doModify($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Modify Data</button>&nbsp;<br>
+            <button type='button' value='' onclick="doDeleteSymbol($('#dlgSymIdx').text()*1, $('#dlgSym').text())">Delete All Data</button>&nbsp;<br>
 		</td></tr>
 		</table>
     </p>

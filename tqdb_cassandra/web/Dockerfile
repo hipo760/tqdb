@@ -59,6 +59,11 @@ RUN chmod +x /var/www/cgi-bin/*.py 2>/dev/null || true
 # Copy static HTML/CSS/JS files
 COPY web/html/ /var/www/html/
 
+# Copy web data files (including CME last-trade calendar CSV)
+COPY web/data/ /opt/tqdb/web/data/
+COPY web/data/ /var/www/data/
+RUN chmod -R +r /opt/tqdb/web/data /var/www/data
+
 # Copy Apache configuration
 COPY web/config/apache.conf /etc/apache2/sites-available/tqdb.conf
 

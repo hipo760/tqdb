@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Return continuous contract switch rows for TXDT/TXON.
+"""Return continuous contract switch rows for TXDT/TXON and CME DT/ON symbols.
 
 Query params:
-- symbol: TXDT or TXON
+- symbol: TXDT, TXON, NQDT, NQON, ESDT, ESON, YMDT, or YMON
 - BEG: UTC datetime (YYYY-MM-DD HH:MM:SS)
 - END: UTC datetime (YYYY-MM-DD HH:MM:SS)
 """
@@ -98,7 +98,7 @@ def main():
         end_text = params.get("END", "")
 
         if not is_continuous_symbol(symbol):
-            send_json({"status": "failed", "error": "symbol must be TXDT or TXON"}, status_code=400)
+            send_json({"status": "failed", "error": "symbol must be TXDT, TXON, NQDT, NQON, ESDT, ESON, YMDT, or YMON"}, status_code=400)
             return
         if not beg_text or not end_text:
             send_json({"status": "failed", "error": "BEG and END are required"}, status_code=400)
@@ -124,7 +124,7 @@ def main():
         session = cluster.connect(cassandra_keyspace)
         session.default_timeout = 60
 
-        holidays = load_holiday_dates()
+        holidays = load_holiday_dates(symbol)
         points = discover_contract_switch_points(symbol, holidays, begin_dt, end_dt)
         points.sort(key=lambda item: item["switch_utc"], reverse=True)
         enrich_switch_points_with_gap(session, cassandra_keyspace, points)

@@ -188,6 +188,83 @@ function twLocalToUtcEpochSec(year, month, day, hh, mm) {
     return Math.floor(Date.UTC(year, month - 1, day, hh - 8, mm, 0) / 1000)
 }
 
+var tzFormatterCache = {}
+
+function getTzFormatter(tzName) {
+    if (!tzFormatterCache[tzName]) {
+        tzFormatterCache[tzName] = new Intl.DateTimeFormat('en-CA', {
+            timeZone: tzName,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        })
+    }
+    return tzFormatterCache[tzName]
+}
+
+function getLocalParts(epochSec, tzName) {
+    var parts = getTzFormatter(tzName).formatToParts(new Date(epochSec * 1000))
+    var out = {}
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i]
+        if (p.type === 'year') out.y = Number(p.value)
+        if (p.type === 'month') out.m = Number(p.value)
+        if (p.type === 'day') out.d = Number(p.value)
+        if (p.type === 'hour') out.hh = Number(p.value)
+        if (p.type === 'minute') out.mm = Number(p.value)
+        if (p.type === 'second') out.ss = Number(p.value)
+    }
+    return out
+}
+
+function localYmdToUtcEpochSec(year, month, day, hh, mm, tzName) {
+    // Resolve local wall-clock in target timezone to UTC epoch seconds (DST-aware).
+    var guessMs = Date.UTC(year, month - 1, day, hh, mm, 0)
+    for (var i = 0; i < 4; i++) {
+        var got = getLocalParts(Math.floor(guessMs / 1000), tzName)
+        var wantMs = Date.UTC(year, month - 1, day, hh, mm, 0)
+        var gotMs = Date.UTC(got.y, got.m - 1, got.d, got.hh || 0, got.mm || 0, got.ss || 0)
+        var diffMs = wantMs - gotMs
+        guessMs += diffMs
+        if (diffMs === 0) {
+            break
+        }
+    }
+    return Math.floor(guessMs / 1000)
+}
+
+function getLocalYmd(epochSec, tzName) {
+    var p = getLocalParts(epochSec, tzName)
+    return { y: p.y, m: p.m, d: p.d }
+}
+
+function getSessionConfig(symbol) {
+    var s = (symbol || '').toUpperCase()
+    if (s === 'NQDT' || s === 'NQON' || s === 'ESDT' || s === 'ESON' || s === 'YMDT' || s === 'YMON') {
+        return {
+            tzName: 'America/Chicago',
+            // CME RTH start
+            tHour: 8,
+            tMin: 30,
+            // CME Globex re-open after maintenance break
+            t1Hour: 17,
+            t1Min: 0
+        }
+    }
+
+    return {
+        tzName: 'Asia/Taipei',
+        tHour: 8,
+        tMin: 45,
+        t1Hour: 13,
+        t1Min: 45
+    }
+}
+
 function getTwYmd(epochSec) {
     var d = new Date((epochSec + TAIFEX_OFFSET_SEC) * 1000)
     return {
@@ -231,8 +308,9 @@ function renderSessionLines() {
 
     var first = currentCandles[0].time
     var last = currentCandles[currentCandles.length - 1].time
-    var firstYmd = getTwYmd(first)
-    var lastYmd = getTwYmd(last)
+    var cfg = getSessionConfig(currentSymbol)
+    var firstYmd = getLocalYmd(first, cfg.tzName)
+    var lastYmd = getLocalYmd(last, cfg.tzName)
     var startSerial = ymdToSerial(firstYmd.y, firstYmd.m, firstYmd.d) - 1
     var endSerial = ymdToSerial(lastYmd.y, lastYmd.m, lastYmd.d) + 1
 
@@ -270,10 +348,8 @@ function renderSessionLines() {
     if (currentResolutionMin <= 30) {
         for (var serial = startSerial; serial <= endSerial; serial++) {
             var ymd = serialToYmd(serial)
-            // T session start: 08:45 (+8)
-            addBoundaryLine(twLocalToUtcEpochSec(ymd.y, ymd.m, ymd.d, 8, 45), 't')
-            // T+1 session start: 13:45 (+8)
-            addBoundaryLine(twLocalToUtcEpochSec(ymd.y, ymd.m, ymd.d, 13, 45), 't1')
+            addBoundaryLine(localYmdToUtcEpochSec(ymd.y, ymd.m, ymd.d, cfg.tHour, cfg.tMin, cfg.tzName), 't')
+            addBoundaryLine(localYmdToUtcEpochSec(ymd.y, ymd.m, ymd.d, cfg.t1Hour, cfg.t1Min, cfg.tzName), 't1')
         }
     } else if (currentResolutionMin === 1440) {
         for (var i = 0; i < currentSwitchPoints.length; i++) {

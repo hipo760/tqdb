@@ -136,7 +136,7 @@ def write_bars_to_tmp_file(bars, tmp_file, gzip_enabled):
 
 
 def process_continuous_symbol(symbol, begin_dt, end_dt, tmp_file, gzip_enabled):
-    """Compose TXON/TXDT minute bars on read (view-like)."""
+    """Compose continuous minute bars on read (view-like)."""
     cassandra_host = os.environ.get("CASSANDRA_HOST", "cassandra-node")
     cassandra_port = int(os.environ.get("CASSANDRA_PORT", "9042"))
     cassandra_keyspace = os.environ.get("CASSANDRA_KEYSPACE", "tqdb1")
@@ -155,7 +155,7 @@ def process_continuous_symbol(symbol, begin_dt, end_dt, tmp_file, gzip_enabled):
     session.default_timeout = 120
 
     try:
-        holidays = load_holiday_dates()
+        holidays = load_holiday_dates(symbol)
         bars = compose_continuous_minbars(
             session=session,
             keyspace=cassandra_keyspace,

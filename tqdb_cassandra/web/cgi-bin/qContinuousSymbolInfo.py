@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Return metadata for continuous symbols TXDT/TXON.
+"""Return metadata for continuous symbols TXDT/TXON and CME DT/ON symbols.
 
 Used by csymbol.html to show queryable 1-minute data range.
 """
@@ -50,17 +50,10 @@ def main():
             send_json({"status": "failed", "error": error_msg}, status_code=503)
             return
 
-        try:
-            holidays = load_holiday_dates()
-        except Exception as exc:
-            error_msg = f"Holiday CSV loading failed: {exc}"
-            print(error_msg, file=sys.stderr)
-            send_json({"status": "failed", "error": error_msg}, status_code=500)
-            return
-
         rows = []
-        for symbol in ["TXON", "TXDT"]:
+        for symbol in ["TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT"]:
             try:
+                holidays = load_holiday_dates(symbol)
                 bounds = discover_continuous_bounds(session, cassandra_keyspace, symbol, holidays)
                 rows.append(bounds)
             except Exception as exc:
