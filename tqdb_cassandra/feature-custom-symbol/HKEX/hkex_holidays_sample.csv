@@ -1,19 +1,38 @@
-# HKEX public holidays (Hong Kong) - sample data
+# HKEX public holidays (Hong Kong) - actual exchange closure days (no trading)
 # Format: YYYYMMDD,HolidayName
-# Update this file with actual HKEX exchange holidays each year.
 # Source: https://www.hkex.com.hk/Services/Trading/Derivatives/Overview/Trading-Calendar-and-Holiday-Schedule
+# Last updated: 2026-04
+#
+# 2025
+20250101,NewYear
+20250129,LunarNewYear1
+20250130,LunarNewYear2
+20250131,LunarNewYear3
+20250404,QingmingFestival
+20250418,GoodFriday
+20250421,EasterMonday
+20250501,LabourDay
+20250505,BirthdayOfBuddha
+20250602,DayFollowingTuenNgFestival
+20250701,HKSAREstablishmentDay
+20251001,NationalDay
+20251007,DayFollowingMidAutumnFestival
+20251029,ChungYeungFestival
+20251225,ChristmasDay
+20251226,DayAfterChristmas
+#
+# 2026
 20260101,NewYear
-20260128,LunarNewYearEve
-20260129,LunarNewYear
-20260130,LunarNewYear
-20260131,LunarNewYear
-20260406,QingmingFestival
-20260503,BuddhaBirthday
-20260525,TuenNgFestival
+20260217,LunarNewYear1
+20260218,LunarNewYear2
+20260219,LunarNewYear3
+20260403,GoodFriday
+20260406,DayFollowingQingmingFestival
+20260407,DayFollowingEasterMonday
+20260501,LabourDay
+20260525,DayFollowingBirthdayOfBuddha
+20260619,TuenNgFestival
 20260701,HKSAREstablishmentDay
-20260920,ChineseMidAutumn
 20261001,NationalDay
-20261002,NationalDayHoliday
-20261026,ChungYeung
+20261019,DayFollowingChungYeungFestival
 20261225,ChristmasDay
-20261228,ChristmasHoliday
