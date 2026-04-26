@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Return continuous contract switch rows for TXDT/TXON and CME DT/ON symbols.
+"""Return continuous contract switch rows for TXDT/TXON, CME DT/ON, and HKEX DT symbols.
 
 Query params:
-- symbol: TXDT, TXON, NQDT, NQON, ESDT, ESON, YMDT, or YMON
+- symbol: TXDT, TXON, NQDT, NQON, ESDT, ESON, YMDT, YMON, or HSIDT
 - BEG: UTC datetime (YYYY-MM-DD HH:MM:SS)
 - END: UTC datetime (YYYY-MM-DD HH:MM:SS)
 """
@@ -98,7 +98,7 @@ def main():
         end_text = params.get("END", "")
 
         if not is_continuous_symbol(symbol):
-            send_json({"status": "failed", "error": "symbol must be TXDT, TXON, NQDT, NQON, ESDT, ESON, YMDT, or YMON"}, status_code=400)
+            send_json({"status": "failed", "error": "symbol must be TXDT, TXON, NQDT, NQON, ESDT, ESON, YMDT, YMON, or HSIDT"}, status_code=400)
             return
         if not beg_text or not end_text:
             send_json({"status": "failed", "error": "BEG and END are required"}, status_code=400)

@@ -1,0 +1,362 @@
+<html>
+<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />
+<link rel='stylesheet' type='text/css' href='/style.css'>
+<script src="/js/jquery-2.1.4.min.js"></script>
+<style>
+  .status-waiting  { color: #777; }
+  .status-running  { color: #0055bb; font-style: italic; }
+  .status-done     { color: #006600; font-weight: bold; }
+  .status-error    { color: #cc0000; font-weight: bold; }
+  #batchTable { width: 100%; }
+  #batchTable td.td-file  { min-width: 200px; }
+  #batchTable td.td-sym   { width: 100px; }
+  #batchTable td.td-status{ min-width: 220px; }
+  #batchTable td.td-act   { width: 60px; }
+  #logPanel {
+      display: none;
+      margin-top: 12px;
+      background: #f5f5f5;
+      border: 1px solid #bbb;
+      padding: 8px;
+      font-family: Consolas, monospace;
+      font-size: 11pt;
+      max-height: 200px;
+      overflow-y: auto;
+  }
+  #logPanel .log-err  { color: #cc0000; }
+  #logPanel .log-done { color: #006600; }
+</style>
+<body onload='addRow();'>
+<script language='javascript'>
+
+/* ── state ──────────────────────────────────────────────── */
+var rowCounter  = 0;
+var isRunning   = false;
+
+/* ── row management ─────────────────────────────────────── */
+function addRow() {
+    rowCounter++;
+    var id   = rowCounter;
+    var tbody = document.getElementById('batchBody');
+    var tr   = document.createElement('tr');
+    tr.id    = 'row-' + id;
+    tr.className = 'whiteThing';
+    tr.innerHTML =
+        '<td>' + id + '</td>' +
+        '<td class="td-file"><input type="file" id="file-' + id + '" accept=".csv,.txt,.tsv"></td>' +
+        '<td class="td-sym"><input type="text" id="sym-' + id +
+              '" style="width:90px;text-transform:uppercase;" placeholder="e.g. ES"></td>' +
+        '<td class="td-status"><span id="status-' + id + '" class="status-waiting">Waiting</span></td>' +
+        '<td class="td-act"><button type="button" id="remove-' + id +
+              '" onclick="removeRow(' + id + ')">Remove</button></td>';
+    tbody.appendChild(tr);
+}
+
+function removeRow(id) {
+    if (isRunning) return;
+    var row = document.getElementById('row-' + id);
+    if (row) row.parentNode.removeChild(row);
+}
+
+/* ── status helpers ─────────────────────────────────────── */
+function setStatus(id, cls, html) {
+    var el = document.getElementById('status-' + id);
+    if (!el) return;
+    el.className = 'status-' + cls;
+    el.innerHTML = html;
+}
+
+function setGlobalMsg(msg, color) {
+    var el = document.getElementById('globalMsg');
+    el.style.color  = color || '#333';
+    el.textContent  = msg;
+}
+
+/* ── log panel helpers ──────────────────────────────────── */
+function appendLog(text, cls) {
+    var panel = document.getElementById('logPanel');
+    panel.style.display = 'block';
+    var div = document.createElement('div');
+    if (cls) div.className = cls;
+    div.textContent = text;
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
+}
+
+function clearLog() {
+    var panel = document.getElementById('logPanel');
+    panel.innerHTML = '';
+    panel.style.display = 'none';
+}
+
+/* ── main entry point ───────────────────────────────────── */
+function startBatch() {
+    if (isRunning) return;
+
+    var rows = document.querySelectorAll('#batchBody tr');
+    if (rows.length === 0) {
+        alert('No rows to import. Click "+ Add File" to add rows.');
+        return;
+    }
+
+    var jobs = [];
+    for (var i = 0; i < rows.length; i++) {
+        var id  = rows[i].id.replace('row-', '');
+        var sym = document.getElementById('sym-' + id).value.trim().toUpperCase();
+        var fi  = document.getElementById('file-' + id);
+
+        if (!sym) {
+            alert('Row ' + (i + 1) + ': Symbol is required.');
+            return;
+        }
+        if (!fi || !fi.files || fi.files.length === 0) {
+            alert('Row ' + (i + 1) + ': Please select a CSV file.');
+            return;
+        }
+        jobs.push({ id: id, sym: sym, file: fi.files[0] });
+    }
+
+    isRunning = true;
+    clearLog();
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnAddRow').disabled = true;
+    setGlobalMsg('Running batch import…', '#0055bb');
+
+    runNext(jobs, 0);
+}
+
+function runNext(jobs, idx) {
+    if (idx >= jobs.length) {
+        isRunning = false;
+        document.getElementById('btnStart').disabled = false;
+        document.getElementById('btnAddRow').disabled = false;
+        setGlobalMsg('All jobs finished.', '#006600');
+        appendLog('=== Batch complete ===', 'log-done');
+        return;
+    }
+    var job = jobs[idx];
+    disableRow(job.id);
+    appendLog('--- [' + (idx + 1) + '/' + jobs.length + '] Symbol: ' + job.sym +
+              '  File: ' + job.file.name + ' ---');
+    processJob(job, function() {
+        runNext(jobs, idx + 1);
+    });
+}
+
+function disableRow(id) {
+    var removeBtn = document.getElementById('remove-' + id);
+    if (removeBtn) removeBtn.disabled = true;
+    var fi = document.getElementById('file-' + id);
+    if (fi) fi.disabled = true;
+    var si = document.getElementById('sym-' + id);
+    if (si) si.disabled = true;
+}
+
+/* ── per-job pipeline ───────────────────────────────────── */
+function processJob(job, callback) {
+    checkSymbol(job, callback);
+}
+
+/* step 1 – check if symbol exists */
+function checkSymbol(job, callback) {
+    setStatus(job.id, 'running', 'Checking symbol…');
+    appendLog('[' + job.sym + '] Checking symbol in database…');
+
+    $.ajax({
+        type: 'GET',
+        url: '/cgi-bin/qsyminfo.py',
+        data: { symbol: job.sym },
+        dataType: 'json',
+        cache: false,
+        success: function(data) {
+            var found = Array.isArray(data) && data.length > 0 &&
+                        data[0] && data[0].symbol;
+            if (found) {
+                appendLog('[' + job.sym + '] Symbol exists, skipping creation.');
+                doUpload(job, callback);
+            } else {
+                createSymbol(job, callback);
+            }
+        },
+        error: function(xhr, status) {
+            appendLog('[' + job.sym + '] Symbol check failed: ' + status, 'log-err');
+            setStatus(job.id, 'error', '&#10007; Symbol check failed');
+            callback();
+        }
+    });
+}
+
+/* step 2 – create symbol with default values */
+function createSymbol(job, callback) {
+    setStatus(job.id, 'running', 'Creating symbol…');
+    appendLog('[' + job.sym + '] Symbol not found – creating with defaults…');
+
+    $.ajax({
+        type: 'GET',
+        url: '/cgi-bin/usymbol.py',
+        data: { sym: job.sym, desc: '', bpv: '', mko: '', mkc: '', ssec: '' },
+        cache: false,
+        complete: function(xhr) {
+            /* usymbol.py always returns 200 (HTML redirect), treat as success */
+            appendLog('[' + job.sym + '] Symbol created.');
+            doUpload(job, callback);
+        }
+    });
+}
+
+/* step 3 – upload and parse CSV */
+function doUpload(job, callback) {
+    setStatus(job.id, 'running', 'Uploading CSV…');
+    appendLog('[' + job.sym + '] Uploading ' + job.file.name + '…');
+
+    var fd = new FormData();
+    fd.append('sym',  job.sym);
+    fd.append('file', job.file);
+
+    $.ajax({
+        type: 'POST',
+        url: '/cgi-bin/i1min_check.py',
+        data: fd,
+        processData: false,
+        contentType: false,
+        dataType: 'json',
+        cache: false,
+        success: function(data) {
+            if (!data || !data.importTicket) {
+                appendLog('[' + job.sym + '] Upload error: no import ticket returned.', 'log-err');
+                setStatus(job.id, 'error', '&#10007; Upload failed');
+                callback();
+                return;
+            }
+            appendLog('[' + job.sym + '] Parsed ' + data.totalCnt +
+                      ' rows. Ticket: ' + data.importTicket);
+            doStartImport(job, data.importTicket, data.totalCnt, callback);
+        },
+        error: function(xhr, status) {
+            appendLog('[' + job.sym + '] Upload request error: ' + status, 'log-err');
+            setStatus(job.id, 'error', '&#10007; Upload error');
+            callback();
+        }
+    });
+}
+
+/* step 4 – trigger background import daemon */
+function doStartImport(job, ticket, totalCnt, callback) {
+    setStatus(job.id, 'running', 'Starting import (' + totalCnt + ' bars)…');
+    appendLog('[' + job.sym + '] Starting import daemon…');
+
+    $.ajax({
+        type: 'GET',
+        url: '/cgi-bin/i1min_do.py',
+        data: { importTicket: ticket },
+        cache: false,
+        complete: function() {
+            pollStatus(job, ticket, totalCnt, 0, callback);
+        }
+    });
+}
+
+/* step 5 – poll until the log shows "Importing finish!" */
+function pollStatus(job, ticket, totalCnt, attempts, callback) {
+    setStatus(job.id, 'running',
+        'Importing… (' + totalCnt + ' bars)');
+
+    $.ajax({
+        type: 'GET',
+        url: '/cgi-bin/i1min_status_json.py',
+        data: { importTicket: ticket },
+        dataType: 'json',
+        cache: false,
+        success: function(data) {
+            if (data.done) {
+                var errMark = data.error ? ' ⚠ check log' : '';
+                appendLog('[' + job.sym + '] Import finished. (' +
+                          data.totalLines + ' log lines)' + errMark,
+                          data.error ? 'log-err' : 'log-done');
+                setStatus(job.id, 'done',
+                    '&#10003; Done (' + totalCnt + ' bars)' + errMark);
+                callback();
+            } else {
+                /* not done yet – re-poll after 1.5 s */
+                setTimeout(function() {
+                    pollStatus(job, ticket, totalCnt, attempts + 1, callback);
+                }, 1500);
+            }
+        },
+        error: function() {
+            if (attempts < 15) {
+                setTimeout(function() {
+                    pollStatus(job, ticket, totalCnt, attempts + 1, callback);
+                }, 2000);
+            } else {
+                appendLog('[' + job.sym + '] Status polling timed out.', 'log-err');
+                setStatus(job.id, 'error', '&#10007; Status timeout');
+                callback();
+            }
+        }
+    });
+}
+
+</script>
+
+<!-- ── navigation ───────────────────────────────────────── -->
+<div style='margin-bottom:10px;'>
+    <a href='/esymbol.html'><button type='button'>All Symbols</button></a>
+    <a href='/csymbol.html'><button type='button'>Continuous</button></a>
+    <a href='/i1min.html'><button type='button'>Import 1Min (single)</button></a>
+    <button type='button' style='font-weight:bold;cursor:default;' disabled>Batch Import 1Min</button>
+</div>
+<hr>
+
+<table style='border:0; padding:0; margin-bottom:6px;'
+       class='tblnoborder'>
+  <tr class='tblnoborder'>
+    <td class='tblnoborder' style='padding-left:0;'>
+      <b>Batch Import 1-Minute CSV Files</b>
+    </td>
+    <td class='tblnoborder' style='padding-left:40px; color:#555; font-size:11pt;'>
+      Add one row per file. Assign a symbol to each file. Symbols are created
+      automatically if they do not exist. Files are processed <em>one by one</em>.
+    </td>
+  </tr>
+</table>
+
+<!-- ── file/symbol table ────────────────────────────────── -->
+<table id='batchTable'>
+    <thead>
+        <tr class='grayThing smallfont'>
+            <td style='width:30px;'>#</td>
+            <td>CSV File</td>
+            <td>Symbol</td>
+            <td>Status</td>
+            <td>Remove</td>
+        </tr>
+    </thead>
+    <tbody id='batchBody'>
+    </tbody>
+</table>
+
+<div style='margin-top:8px;'>
+    <button type='button' id='btnAddRow' onclick='addRow()'>+ Add File</button>
+    &nbsp;
+    <button type='button' id='btnStart'
+            onclick='startBatch()'
+            style='margin-left:20px; padding:4px 16px;'>
+        &#9654; Start Batch Import
+    </button>
+    &nbsp;&nbsp;
+    <span id='globalMsg'></span>
+</div>
+
+<!-- ── live log area ─────────────────────────────────────── -->
+<div id='logPanel'></div>
+
+<div style='margin-top:14px; color:#555; font-size:11pt;'>
+    <b>CSV / TXT row format:</b> <code>Date,Time,Open,High,Low,Close,Vol</code><br>
+    Date supports: <code>YYYYmmDD</code> &nbsp;|&nbsp; <code>YYYY-M-D</code>
+                 &nbsp;|&nbsp; <code>YYYY/M/D</code> &nbsp;|&nbsp; <code>M/D/YYYY</code><br>
+    Time supports: <code>HHMMSS</code> &nbsp;|&nbsp; <code>H:M:S</code>
+                 &nbsp;|&nbsp; <code>H:M</code>
+</div>
+
+</body></html>

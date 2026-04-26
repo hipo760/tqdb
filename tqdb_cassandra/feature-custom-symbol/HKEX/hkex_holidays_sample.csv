@@ -1,0 +1,19 @@
+# HKEX public holidays (Hong Kong) - sample data
+# Format: YYYYMMDD,HolidayName
+# Update this file with actual HKEX exchange holidays each year.
+# Source: https://www.hkex.com.hk/Services/Trading/Derivatives/Overview/Trading-Calendar-and-Holiday-Schedule
+20260101,NewYear
+20260128,LunarNewYearEve
+20260129,LunarNewYear
+20260130,LunarNewYear
+20260131,LunarNewYear
+20260406,QingmingFestival
+20260503,BuddhaBirthday
+20260525,TuenNgFestival
+20260701,HKSAREstablishmentDay
+20260920,ChineseMidAutumn
+20261001,NationalDay
+20261002,NationalDayHoliday
+20261026,ChungYeung
+20261225,ChristmasDay
+20261228,ChristmasHoliday

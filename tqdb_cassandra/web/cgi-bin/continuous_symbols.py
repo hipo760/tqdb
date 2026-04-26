@@ -18,11 +18,13 @@ from typing import Iterable
 from zoneinfo import ZoneInfo
 
 
-CONTINUOUS_SYMBOLS = {"TXDT", "TXON", "NQDT", "NQON", "ESDT", "ESON", "YMDT", "YMON"}
+CONTINUOUS_SYMBOLS = {"TXDT", "TXON", "NQDT", "NQON", "ESDT", "ESON", "YMDT", "YMON", "HSIDT"}
 TAIFEX_SYMBOLS = {"TXDT", "TXON"}
 CME_DT_SYMBOLS = {"NQDT", "ESDT", "YMDT"}
 CME_ON_SYMBOLS = {"NQON", "ESON", "YMON"}
 CME_SYMBOLS = CME_DT_SYMBOLS | CME_ON_SYMBOLS
+HKEX_DT_SYMBOLS = {"HSIDT"}
+HKEX_SYMBOLS = HKEX_DT_SYMBOLS
 MONTH_CODES = "ABCDEFGHIJKL"
 FUTURES_MONTH_CODES = "FGHJKMNQUVXZ"
 TXF_PREFIX = "TXF"
@@ -53,17 +55,27 @@ def _contract_month_to_cme_symbol(product: str, contract_month: str) -> str:
     return f"{CME_PRODUCT_CODES[product]}{FUTURES_MONTH_CODES[month - 1]}{year % 10}"
 
 
+def _contract_month_to_hsi_symbol(contract_month: str) -> str:
+    """Convert YYYYMM to HSI futures symbol, e.g. '202606' -> 'HSIM6'."""
+    year = int(contract_month[:4])
+    month = int(contract_month[4:6])
+    return f"HSI{FUTURES_MONTH_CODES[month - 1]}{year % 10}"
+
+
 def _family_for_symbol(symbol: str) -> str:
     normalized = normalize_symbol(symbol)
     if normalized in TAIFEX_SYMBOLS:
         return "TAIFEX"
     if normalized in CME_SYMBOLS:
         return "CME"
+    if normalized in HKEX_SYMBOLS:
+        return "HKEX"
     raise ValueError(f"Unsupported continuous symbol: {symbol}")
 
 
 YMD_RE = re.compile(r"^(\d{8})$")
 TW_TZ = timezone(timedelta(hours=8))
+HK_TZ = TW_TZ  # Hong Kong Time (UTC+8), same offset as Taiwan
 UTC_TZ = timezone.utc
 try:
     CHICAGO_TZ = ZoneInfo("America/Chicago")
@@ -74,6 +86,8 @@ TXDT_SESSION_BEGIN = time(8, 45)
 TXDT_SESSION_END = time(13, 45)
 CME_DT_SESSION_BEGIN = time(8, 30)
 CME_DT_SESSION_END = time(15, 15)
+HSIDT_SESSION_BEGIN = time(9, 15)
+HSIDT_SESSION_END = time(16, 30)
 _CME_LAST_TRADE_CACHE: dict[str, dict[str, date]] = {}
 
 
@@ -214,6 +228,30 @@ def _resolve_holiday_csv_path(symbol: str | None = None) -> Path:
             f"Set CME_HOLIDAY_CSV env var or ensure file exists."
         )
 
+    if family == "HKEX":
+        env_path = os.environ.get("HKEX_HOLIDAY_CSV")
+        if env_path:
+            candidate = Path(env_path)
+            if candidate.exists():
+                return candidate
+
+        candidates = [
+            Path(__file__).resolve().parents[2] / "feature-custom-symbol" / "HKEX" / "hkex_holidays_sample.csv",
+            Path("/opt/tqdb/feature-custom-symbol/HKEX/hkex_holidays_sample.csv"),
+            Path("/tqdb/feature-custom-symbol/HKEX/hkex_holidays_sample.csv"),
+            Path("./feature-custom-symbol/HKEX/hkex_holidays_sample.csv"),
+            Path("../../../feature-custom-symbol/HKEX/hkex_holidays_sample.csv"),
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        raise FileNotFoundError(
+            f"HKEX holiday CSV not found. Searched: {', '.join(str(c) for c in candidates)}. "
+            f"Set HKEX_HOLIDAY_CSV env var or ensure file exists."
+        )
+
     env_path = os.environ.get("TAIFEX_HOLIDAY_CSV")
     if env_path:
         candidate = Path(env_path)
@@ -286,6 +324,23 @@ def _estimate_last_trading_day(symbol: str, contract_month: str, holidays: set[d
         third_wed = _third_weekday_of_month(year, month, 2)
         return _adjust_to_next_trading_day(third_wed, holidays)
 
+    if family == "HKEX":
+        hsi_symbol = _contract_month_to_hsi_symbol(contract_month)
+        last_trade_map = _load_cme_last_trade_dates("HSI")
+        if hsi_symbol in last_trade_map:
+            return last_trade_map[hsi_symbol]
+        # Fallback: last business day of the contract month.
+        if month < 12:
+            last = date(year, month + 1, 1) - timedelta(days=1)
+        else:
+            last = date(year + 1, 1, 1) - timedelta(days=1)
+        fallback = _adjust_to_prev_trading_day(last, holidays)
+        print(
+            f"Warning: Missing last-trade date for {hsi_symbol} in HSI CSV, using fallback={fallback}",
+            file=sys.stderr,
+        )
+        return fallback
+
     # CME products: prefer configured exchange last-trade date from CSV.
     product = _continuous_to_cme_product(symbol)
     cme_symbol = _contract_month_to_cme_symbol(product, contract_month)
@@ -356,6 +411,11 @@ def _build_segments(symbol: str, begin_dt: datetime, end_dt: datetime, holidays:
         end_hhmm = "1515"
         end_offset_min = 0
         local_tz = CHICAGO_TZ
+    elif symbol in HKEX_DT_SYMBOLS:
+        start_hhmm = "0915"
+        end_hhmm = "0915"
+        end_offset_min = -1
+        local_tz = HK_TZ
     else:
         return []
 
@@ -380,6 +440,8 @@ def _build_segments(symbol: str, begin_dt: datetime, end_dt: datetime, holidays:
 
         if symbol in TAIFEX_SYMBOLS:
             mapped_symbol = _contract_month_to_taifex_symbol(contract_month)
+        elif symbol in HKEX_SYMBOLS:
+            mapped_symbol = _contract_month_to_hsi_symbol(contract_month)
         else:
             mapped_symbol = _contract_month_to_cme_symbol(_continuous_to_cme_product(symbol), contract_month)
 
@@ -418,6 +480,11 @@ def _is_dt_session_bar(symbol: str, dt_utc_naive: datetime) -> bool:
         local_t = dt_local.timetz().replace(tzinfo=None)
         return CME_DT_SESSION_BEGIN <= local_t <= CME_DT_SESSION_END
 
+    if symbol in HKEX_DT_SYMBOLS:
+        dt_local = dt_utc_naive.replace(tzinfo=UTC_TZ).astimezone(HK_TZ)
+        local_t = dt_local.timetz().replace(tzinfo=None)
+        return HSIDT_SESSION_BEGIN <= local_t <= HSIDT_SESSION_END
+
     return True
 
 
@@ -448,7 +515,7 @@ def compose_continuous_minbars(
         seg_rows: list[tuple[datetime, object, object, object, object, object]] = []
         rows = _query_minbar_rows(session, keyspace, seg.tc_symbol, query_begin, query_end)
         for row in rows:
-            if symbol in (TAIFEX_SYMBOLS | CME_DT_SYMBOLS) and not _is_dt_session_bar(symbol, row.datetime):
+            if symbol in (TAIFEX_SYMBOLS | CME_DT_SYMBOLS | HKEX_DT_SYMBOLS) and not _is_dt_session_bar(symbol, row.datetime):
                 continue
             seg_rows.append((row.datetime, row.open, row.high, row.low, row.close, getattr(row, "vol", 0)))
         segment_bars.append(seg_rows)
@@ -600,6 +667,9 @@ def discover_contract_switch_points(
     elif symbol in CME_ON_SYMBOLS:
         switch_hhmm = "1516"
         local_tz = CHICAGO_TZ
+    elif symbol in HKEX_DT_SYMBOLS:
+        switch_hhmm = "0915"
+        local_tz = HK_TZ
     else:
         raise ValueError(f"Unsupported continuous symbol: {symbol}")
 
@@ -624,6 +694,9 @@ def discover_contract_switch_points(
             if symbol in TAIFEX_SYMBOLS:
                 before_symbol = _contract_month_to_taifex_symbol(prev_contract_month)
                 after_symbol = _contract_month_to_taifex_symbol(next_contract_month)
+            elif symbol in HKEX_SYMBOLS:
+                before_symbol = _contract_month_to_hsi_symbol(prev_contract_month)
+                after_symbol = _contract_month_to_hsi_symbol(next_contract_month)
             else:
                 product = _continuous_to_cme_product(symbol)
                 before_symbol = _contract_month_to_cme_symbol(product, prev_contract_month)

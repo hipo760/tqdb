@@ -51,7 +51,7 @@ def main():
             return
 
         rows = []
-        for symbol in ["TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT"]:
+        for symbol in ["TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT", "HSIDT"]:
             try:
                 holidays = load_holiday_dates(symbol)
                 bounds = discover_continuous_bounds(session, cassandra_keyspace, symbol, holidays)
