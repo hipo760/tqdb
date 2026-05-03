@@ -27,11 +27,10 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
 
 
 # ---------------------------------------------------------------------------
@@ -48,27 +47,11 @@ FUTURES_MONTH_CODES = "FGHJKMNQUVXZ"
 TAIFEX_ROOTS: frozenset[str] = frozenset({"TX", "TXF"})
 
 UTC_TZ = timezone.utc
-TW_TZ = timezone(timedelta(hours=8))    # Taiwan Time / Hong Kong Time (UTC+8)
-HK_TZ = TW_TZ
-try:
-    CHICAGO_TZ = ZoneInfo("America/Chicago")
-except Exception:
-    CHICAGO_TZ = timezone(timedelta(hours=-6))  # fixed fallback if zoneinfo missing
 
 # Minutes before switch_utc to look up close prices for price adjustment
 _PRICE_ADJUST_LOOKBACK_MIN = 30
 
 _FAR_FUTURE = datetime(9999, 12, 31, 23, 59, 59)
-
-# DT-session filter: bars outside this local-time window are excluded for DT symbols.
-# ON symbols and any unlisted symbol: all bars included.
-_DT_SESSION_CONFIG: dict[str, tuple[time, time, object]] = {
-    "TXDT":  (time(8, 45),  time(13, 45), TW_TZ),
-    "NQDT":  (time(8, 30),  time(15, 15), CHICAGO_TZ),
-    "ESDT":  (time(8, 30),  time(15, 15), CHICAGO_TZ),
-    "YMDT":  (time(8, 30),  time(15, 15), CHICAGO_TZ),
-    "HSIDT": (time(9, 15),  time(16, 30), HK_TZ),
-}
 
 
 # ---------------------------------------------------------------------------
@@ -112,9 +95,6 @@ def _rollover_entry_to_utc(
     rollover_time: str,
     timezone_offset: int,
 ) -> datetime | None:
-    """Convert API rollover_date (YYYY-MM-DD), rollover_time (HH:mm), and integer
-    UTC offset to a UTC-naive datetime.  Returns None when rollover_date is null/empty.
-    """
     if not rollover_date:
         return None
     local_str = f"{rollover_date} {rollover_time}:00"
@@ -124,18 +104,6 @@ def _rollover_entry_to_utc(
         return None
     tz = timezone(timedelta(hours=timezone_offset))
     return local_dt.replace(tzinfo=tz).astimezone(UTC_TZ).replace(tzinfo=None)
-
-
-def _is_dt_session_bar(symbol: str, dt_utc_naive: datetime) -> bool:
-    """Return True if the bar timestamp falls within the DT session for symbol.
-    Symbols not in _DT_SESSION_CONFIG (ON symbols, unknown) always return True.
-    """
-    cfg = _DT_SESSION_CONFIG.get(normalize_symbol(symbol))
-    if cfg is None:
-        return True
-    session_begin, session_end, local_tz = cfg
-    local_t = dt_utc_naive.replace(tzinfo=UTC_TZ).astimezone(local_tz).time()
-    return session_begin <= local_t <= session_end
 
 
 # ---------------------------------------------------------------------------
@@ -434,8 +402,6 @@ def compose_continuous_minbars(
 
         shift = offsets[i]
         for row in rows:
-            if not _is_dt_session_bar(sym, row.datetime):
-                continue
             if shift:
                 bars.append((
                     row.datetime,

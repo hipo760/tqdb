@@ -32,30 +32,77 @@
 /* ── state ──────────────────────────────────────────────── */
 var rowCounter  = 0;
 var isRunning   = false;
+var storedFiles = {};   /* id -> File object (used for multi-select rows) */
+
+/* ── helpers ────────────────────────────────────────────── */
+function fileBaseName(name) {
+    return name.replace(/\.[^/.]+$/, '');
+}
 
 /* ── row management ─────────────────────────────────────── */
-function addRow() {
+/* presetFile: optional File object from multi-select picker */
+function addRow(presetFile) {
     rowCounter++;
-    var id   = rowCounter;
+    var id    = rowCounter;
     var tbody = document.getElementById('batchBody');
-    var tr   = document.createElement('tr');
-    tr.id    = 'row-' + id;
+    var tr    = document.createElement('tr');
+    tr.id     = 'row-' + id;
     tr.className = 'whiteThing';
+
+    var sym      = '';
+    var fileCell = '';
+    if (presetFile) {
+        storedFiles[id] = presetFile;
+        sym = fileBaseName(presetFile.name).toUpperCase();
+        fileCell = '<span id="filelabel-' + id + '" title="' + presetFile.name + '" ' +
+                   'style="font-size:10pt;color:#333;">' + presetFile.name + '</span>';
+    } else {
+        fileCell = '<input type="file" id="file-' + id + '" accept=".csv,.txt,.tsv" ' +
+                   'onchange="onFileInputChange(' + id + ')">';
+    }
+
     tr.innerHTML =
         '<td>' + id + '</td>' +
-        '<td class="td-file"><input type="file" id="file-' + id + '" accept=".csv,.txt,.tsv"></td>' +
+        '<td class="td-file">' + fileCell + '</td>' +
         '<td class="td-sym"><input type="text" id="sym-' + id +
-              '" style="width:90px;text-transform:uppercase;" placeholder="e.g. ES"></td>' +
+              '" style="width:90px;text-transform:uppercase;" placeholder="e.g. ES" value="' +
+              sym + '"></td>' +
         '<td class="td-status"><span id="status-' + id + '" class="status-waiting">Waiting</span></td>' +
         '<td class="td-act"><button type="button" id="remove-' + id +
               '" onclick="removeRow(' + id + ')">Remove</button></td>';
     tbody.appendChild(tr);
 }
 
+/* auto-fill symbol when user picks a file via the row's own file input */
+function onFileInputChange(id) {
+    var fi = document.getElementById('file-' + id);
+    if (!fi || !fi.files || fi.files.length === 0) return;
+    storedFiles[id] = fi.files[0];
+    var si = document.getElementById('sym-' + id);
+    if (si && !si.value.trim()) {
+        si.value = fileBaseName(fi.files[0].name).toUpperCase();
+    }
+}
+
+/* multi-file picker: add one row per selected file */
+function selectMultipleFiles() {
+    document.getElementById('multiFilePicker').click();
+}
+
+function onMultiFileChange() {
+    var picker = document.getElementById('multiFilePicker');
+    var files  = picker.files;
+    for (var i = 0; i < files.length; i++) {
+        addRow(files[i]);
+    }
+    picker.value = '';  /* reset so the same files can be re-selected */
+}
+
 function removeRow(id) {
     if (isRunning) return;
     var row = document.getElementById('row-' + id);
     if (row) row.parentNode.removeChild(row);
+    delete storedFiles[id];
 }
 
 /* ── status helpers ─────────────────────────────────────── */
@@ -104,22 +151,25 @@ function startBatch() {
         var id  = rows[i].id.replace('row-', '');
         var sym = document.getElementById('sym-' + id).value.trim().toUpperCase();
         var fi  = document.getElementById('file-' + id);
+        var fileObj = storedFiles[id] ||
+                      (fi && fi.files && fi.files.length > 0 ? fi.files[0] : null);
 
         if (!sym) {
             alert('Row ' + (i + 1) + ': Symbol is required.');
             return;
         }
-        if (!fi || !fi.files || fi.files.length === 0) {
+        if (!fileObj) {
             alert('Row ' + (i + 1) + ': Please select a CSV file.');
             return;
         }
-        jobs.push({ id: id, sym: sym, file: fi.files[0] });
+        jobs.push({ id: id, sym: sym, file: fileObj });
     }
 
     isRunning = true;
     clearLog();
     document.getElementById('btnStart').disabled = true;
     document.getElementById('btnAddRow').disabled = true;
+    document.getElementById('btnMultiSelect').disabled = true;
     setGlobalMsg('Running batch import…', '#0055bb');
 
     runNext(jobs, 0);
@@ -130,6 +180,7 @@ function runNext(jobs, idx) {
         isRunning = false;
         document.getElementById('btnStart').disabled = false;
         document.getElementById('btnAddRow').disabled = false;
+        document.getElementById('btnMultiSelect').disabled = false;
         setGlobalMsg('All jobs finished.', '#006600');
         appendLog('=== Batch complete ===', 'log-done');
         return;
@@ -336,8 +387,17 @@ function pollStatus(job, ticket, totalCnt, attempts, callback) {
     </tbody>
 </table>
 
+<!-- hidden input for multi-file selection -->
+<input type='file' id='multiFilePicker' multiple accept='.csv,.txt,.tsv'
+       style='display:none;' onchange='onMultiFileChange()'>
+
 <div style='margin-top:8px;'>
     <button type='button' id='btnAddRow' onclick='addRow()'>+ Add File</button>
+    &nbsp;
+    <button type='button' id='btnMultiSelect' onclick='selectMultipleFiles()'
+            style='margin-left:6px;'>
+        &#128193; Select Multiple Files
+    </button>
     &nbsp;
     <button type='button' id='btnStart'
             onclick='startBatch()'
