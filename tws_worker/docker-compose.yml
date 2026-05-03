@@ -1,0 +1,22 @@
+services:
+  tws-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tws-worker:latest
+    container_name: tws_worker
+    restart: unless-stopped
+
+    environment:
+      CONFIG_PATH: /config/config.yaml
+      PYTHONUNBUFFERED: "1"
+
+    volumes:
+      # Mount your config file — edit config.yaml then restart the container
+      - ./config.yaml:/config/config.yaml:ro
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

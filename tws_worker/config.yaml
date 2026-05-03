@@ -1,0 +1,42 @@
+# TWS Worker — kline fetcher configuration
+# Mount this file to /config/config.yaml inside the container.
+
+tws:
+  host: "192.168.1.100"  # IP of the machine running TWS / IB Gateway
+  port: 7497             # 7497 = TWS paper | 7496 = TWS live | 4002 = IB Gateway paper | 4001 = IB Gateway live
+  client_id: 1
+
+# List of futures contracts to fetch on every cycle.
+# All fields map directly to ibapi Contract fields.
+# All requests are fired in parallel; total wait time = slowest response.
+contracts:
+  - symbol: "NQ"
+    sec_type: "FUT"              # FUT | STK | CASH | OPT | CONTFUT
+    exchange: "CME"
+    currency: "USD"
+    last_trade_date: "202509"    # YYYYMM for futures; leave blank for stocks/forex
+
+  - symbol: "ES"
+    sec_type: "FUT"
+    exchange: "CME"
+    currency: "USD"
+    last_trade_date: "202509"
+
+fetch:
+  interval_seconds: 30         # seconds between each polling cycle (continuous mode)
+  bar_size: "1 min"            # TWS bar-size string
+  duration: "300 S"            # look-back window per cycle: "300 S" = last 5 minutes
+  what_to_show: "TRADES"       # TRADES | MIDPOINT | BID | ASK | BID_ASK
+  use_rth: 0                   # 0 = all hours, 1 = regular trading hours only
+  request_timeout: 60          # seconds to wait for TWS response per contract
+
+  # ── Optional fixed time window ──────────────────────────────────────────────
+  # When both start_time AND end_time are set the script fetches that exact
+  # window ONCE for all contracts, prints results, then exits.
+  # Format: "YYYYMMDD HH:mm:ss" (TWS local time).
+  # Leave both empty to run continuously.
+  start_time: ""
+  end_time: ""
+
+logging:
+  level: "INFO"    # DEBUG | INFO | WARNING | ERROR

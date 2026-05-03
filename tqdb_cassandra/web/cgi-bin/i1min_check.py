@@ -70,18 +70,13 @@ def process_post_data():
         param['Import'] = auto_import
 
     # Handle timezone conversion settings
+    # tzSelect = source timezone of the CSV file; destination is always UTC
     tz_conv = form.getvalue('tzConv')
     tz_select = form.getvalue('tzSelect')
 
     if tz_conv == 'on' and tz_select is not None and tz_select != '':
-        param['tzFromTo'] = [tz_select, 'local']
-        try:
-            # Try to read the system timezone
-            with open('/etc/timezone', 'r', encoding='utf-8') as f:
-                param['tzFromTo'][1] = f.readline().strip()
-        except (IOError, OSError):
-            # Use 'local' as fallback if timezone file is not accessible
-            pass
+        # TQDB always stores data in UTC; tzSelect is the source timezone of the CSV
+        param['tzFromTo'] = [tz_select, 'UTC']
     else:
         param['tzFromTo'] = None
 
@@ -172,8 +167,8 @@ def process_post_data():
 
         # Execute timezone conversion script
         tz_to_file = f'/tmp/{import_ticket}.tzTo'
-        tools_dir = os.environ.get('TOOLS_DIR', '/opt/tqdb/tools/')
-        run_cmd = (f"{tools_dir}/csvtzconv.py "
+        tools_dir = os.environ.get('TOOLS_DIR', '/opt/tqdb/tools')
+        run_cmd = (f"python3 {tools_dir}/scripts/csvtzconv.py "
                   f"'{param['tzFromTo'][0]}' '{param['tzFromTo'][1]}' "
                   f"'{tz_from_file}' > '{tz_to_file}'")
         param['tzConvertCmd'] = run_cmd

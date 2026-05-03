@@ -1,0 +1,13 @@
+[project]
+name = "tws-worker"
+version = "0.1.0"
+description = "IBKR TWS worker — fetches market data and ingests into Cassandra"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ibapi",
+    "pyyaml>=6.0",
+]
+
+[tool.uv.sources]
+ibapi = { path = "ibkr_libs/IBJts/source/pythonclient" }
