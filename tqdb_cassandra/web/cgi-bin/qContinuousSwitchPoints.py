@@ -67,6 +67,7 @@ def enrich_switch_points_with_gap(session, keyspace, points):
     definition used for continuous bar composition.
     """
     _LOOKBACK_MIN = 30
+    now_utc = datetime.utcnow()
     q_close = (
         f"SELECT datetime, close FROM {{keyspace}}.minbar "
         "WHERE symbol = %s AND datetime <= %s ORDER BY datetime DESC LIMIT 1"
@@ -75,6 +76,18 @@ def enrich_switch_points_with_gap(session, keyspace, points):
     for row in points:
         switch_dt = parse_utc_text(row["switch_utc"])
         lookback = switch_dt - timedelta(minutes=_LOOKBACK_MIN)
+        row["lookback_utc"] = lookback.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Future switch point — rollover hasn't happened yet; prices at lookback
+        # are just today's market prices, not the actual rollover diff.
+        if switch_dt > now_utc:
+            row["before_close"] = None
+            row["before_close_utc"] = None
+            row["after_close"] = None
+            row["after_close_utc"] = None
+            row["diff"] = None
+            continue
+
         before_symbol = row["before_symbol"]
         after_symbol = row["after_symbol"]
 
@@ -95,7 +108,6 @@ def enrich_switch_points_with_gap(session, keyspace, points):
         row["after_close"] = _to_json_number(after_close)
         row["after_close_utc"] = after_row.datetime.strftime("%Y-%m-%d %H:%M:%S") if after_row else None
         row["diff"] = _to_json_number(diff)
-        row["lookback_utc"] = lookback.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main():

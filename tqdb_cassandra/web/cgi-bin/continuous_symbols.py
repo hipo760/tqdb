@@ -337,9 +337,14 @@ def _compute_switch_diffs(
     in the cumulative offset computation).
     """
     diffs: list[float | None] = [None] * len(raw_segments)
+    now_utc = datetime.utcnow()
     for i in range(len(raw_segments) - 1):
         # switch_utc is the start of the next segment
         switch_utc = raw_segments[i + 1][0]
+        # Skip future switch points — the rollover hasn't happened yet so any
+        # "close" we'd find is just today's price, not the actual rollover diff.
+        if switch_utc > now_utc:
+            continue
         lookback = switch_utc - timedelta(minutes=_PRICE_ADJUST_LOOKBACK_MIN)
         before_sym = raw_segments[i][2]
         after_sym = raw_segments[i + 1][2]
