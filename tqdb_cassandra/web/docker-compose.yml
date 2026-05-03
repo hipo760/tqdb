@@ -19,6 +19,9 @@ services:
       - WAIT_FOR_CASSANDRA=true
       - TQDB_ENDPOINT_LOGGING=true
       - TQDB_LOG_DIR=/var/log/apache2
+      # Instrument API for continuous futures rollover schedule
+      - INSTRUMENT_API_BASE_URL=https://mc.dev-tt91.cc
+      - INSTRUMENT_API_TOKEN=RgETMCWzrRJvt0WYDIZKyjB7pvPUojZRUfEffcQw3x0
     
     # Volumes for persistent data
     volumes:

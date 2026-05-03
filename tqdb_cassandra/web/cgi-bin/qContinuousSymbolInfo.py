@@ -14,7 +14,7 @@ import traceback
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster
 
-from continuous_symbols import discover_continuous_bounds, load_holiday_dates
+from continuous_symbols import discover_continuous_bounds, fetch_continuous_futures
 
 
 def send_json(payload, status_code=200):
@@ -50,11 +50,20 @@ def main():
             send_json({"status": "failed", "error": error_msg}, status_code=503)
             return
 
+        try:
+            cf_rows = fetch_continuous_futures()
+            symbols_to_query = [row["symbol"] for row in cf_rows] if cf_rows else [
+                "TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT", "HSIDT"
+            ]
+        except Exception:
+            symbols_to_query = [
+                "TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT", "HSIDT"
+            ]
+
         rows = []
-        for symbol in ["TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT", "HSIDT"]:
+        for symbol in symbols_to_query:
             try:
-                holidays = load_holiday_dates(symbol)
-                bounds = discover_continuous_bounds(session, cassandra_keyspace, symbol, holidays)
+                bounds = discover_continuous_bounds(session, cassandra_keyspace, symbol)
                 rows.append(bounds)
             except Exception as exc:
                 error_msg = f"Failed to discover bounds for {symbol}: {exc}"

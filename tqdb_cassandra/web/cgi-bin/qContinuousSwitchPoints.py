@@ -12,7 +12,7 @@ Query params:
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import unquote
 
 from cassandra.auth import PlainTextAuthProvider
@@ -21,7 +21,6 @@ from cassandra.cluster import Cluster
 from continuous_symbols import (
     discover_contract_switch_points,
     is_continuous_symbol,
-    load_holiday_dates,
     normalize_symbol,
 )
 
@@ -61,32 +60,42 @@ def _to_json_number(v):
 
 
 def enrich_switch_points_with_gap(session, keyspace, points):
-    q_prev = (
-        f"SELECT datetime, close FROM {keyspace}.minbar "
-        "WHERE symbol = %s AND datetime < %s ORDER BY datetime DESC LIMIT 1"
-    )
-    q_next = (
-        f"SELECT datetime, open FROM {keyspace}.minbar "
-        "WHERE symbol = %s AND datetime >= %s ORDER BY datetime ASC LIMIT 1"
+    """Enrich switch points with close-to-close diff at (switch_utc - 30 min).
+
+    Both before_close and after_close are taken from the last available bar
+    at or before (switch_utc - 30 minutes), matching the price adjustment
+    definition used for continuous bar composition.
+    """
+    _LOOKBACK_MIN = 30
+    q_close = (
+        f"SELECT datetime, close FROM {{keyspace}}.minbar "
+        "WHERE symbol = %s AND datetime <= %s ORDER BY datetime DESC LIMIT 1"
     )
 
     for row in points:
         switch_dt = parse_utc_text(row["switch_utc"])
+        lookback = switch_dt - timedelta(minutes=_LOOKBACK_MIN)
         before_symbol = row["before_symbol"]
         after_symbol = row["after_symbol"]
 
-        prev_row = session.execute(q_prev, [before_symbol, switch_dt], timeout=60).one()
-        next_row = session.execute(q_next, [after_symbol, switch_dt], timeout=60).one()
+        q = q_close.format(keyspace=keyspace)
+        before_row = session.execute(q, [before_symbol, lookback], timeout=60).one()
+        after_row = session.execute(q, [after_symbol, lookback], timeout=60).one()
 
-        before_close = prev_row.close if prev_row else None
-        after_open = next_row.open if next_row else None
-        gap = (after_open - before_close) if (before_close is not None and after_open is not None) else None
+        before_close = before_row.close if before_row else None
+        after_close = after_row.close if after_row else None
+        diff = (
+            (after_close - before_close)
+            if (before_close is not None and after_close is not None)
+            else None
+        )
 
         row["before_close"] = _to_json_number(before_close)
-        row["before_close_utc"] = prev_row.datetime.strftime("%Y-%m-%d %H:%M:%S") if prev_row else None
-        row["after_open"] = _to_json_number(after_open)
-        row["after_open_utc"] = next_row.datetime.strftime("%Y-%m-%d %H:%M:%S") if next_row else None
-        row["gap"] = _to_json_number(gap)
+        row["before_close_utc"] = before_row.datetime.strftime("%Y-%m-%d %H:%M:%S") if before_row else None
+        row["after_close"] = _to_json_number(after_close)
+        row["after_close_utc"] = after_row.datetime.strftime("%Y-%m-%d %H:%M:%S") if after_row else None
+        row["diff"] = _to_json_number(diff)
+        row["lookback_utc"] = lookback.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main():
@@ -124,8 +133,7 @@ def main():
         session = cluster.connect(cassandra_keyspace)
         session.default_timeout = 60
 
-        holidays = load_holiday_dates(symbol)
-        points = discover_contract_switch_points(symbol, holidays, begin_dt, end_dt)
+        points = discover_contract_switch_points(symbol, begin_dt, end_dt)
         points.sort(key=lambda item: item["switch_utc"], reverse=True)
         enrich_switch_points_with_gap(session, cassandra_keyspace, points)
 

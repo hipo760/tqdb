@@ -2,81 +2,89 @@
 <meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />
 <link rel='stylesheet' type='text/css' href='/style.css'>
 <script src="/js/jquery-2.1.4.min.js"></script>
+<style>
+  .avail-section { margin-top: 18px; }
+  .avail-symbol-header {
+    cursor: pointer;
+    font-weight: bold;
+    padding: 4px 8px;
+    background: #dde;
+    border: 1px solid #aab;
+    user-select: none;
+  }
+  .avail-symbol-header:hover { background: #ccf; }
+  .avail-contracts { display: none; padding: 4px 0 4px 12px; }
+  .avail-contracts table { border-collapse: collapse; }
+  .avail-contracts td, .avail-contracts th {
+    border: 1px solid #ccc;
+    padding: 2px 8px;
+    font-size: 0.85em;
+  }
+  .avail-contracts th { background: #eee; }
+  .badge-yes { color: #060; font-weight: bold; }
+  .badge-no  { color: #900; }
+  .error-msg { color: #c00; font-style: italic; }
+</style>
 <script language='javascript'>
 function myUrlEncode(str)
 {
     return encodeURI(str).replace(/&/i, '%26')
 }
 
-function DoAjax(requestUrl, sentData, sHandler, eHandler, pageNotFoundHandler){
+function DoAjax(requestUrl, sentData, sHandler, eHandler){
     $.ajax({
         type: 'GET',
         url: requestUrl,
         cache: false,
         data: sentData,
         success: sHandler,
-        error: eHandler,
-        statusCode: {
-            404: pageNotFoundHandler
-        }
+        error: eHandler
     });
 }
+
+/* ── Summary table (data range) ───────────────────────────────── */
 
 function qContinuousInfo()
 {
     DoAjax('/cgi-bin/qContinuousSymbolInfo.py', {},
-        function(data, textStatus, jqXHR){
+        function(data){
             if (data && data.status === 'failed') {
-                alert('Failed to load continuous symbols: ' + data.error)
-                makeMainTable([])
+                document.getElementById('csymbolTableDiv').innerHTML =
+                    "<span class='error-msg'>Failed to load: " + data.error + "</span>"
                 return
             }
             makeMainTable((data && data.symbols) ? data.symbols : [])
         },
-        function(jqXHR, textStatus, errorThrown){
-            alert('Failed to load continuous symbols: ' + textStatus)
-            makeMainTable([])
+        function(jqXHR, textStatus){
+            document.getElementById('csymbolTableDiv').innerHTML =
+                "<span class='error-msg'>Request failed: " + textStatus + "</span>"
         }
     )
 }
 
-function buildQ1minUrl(sym, end){
-    if (!end || end === '-') {
-        return ''
-    }
-    var range = getLastFiveDaysRange(end)
-    if (!range) {
-        return ''
-    }
-    return '/cgi-bin/q1min.py?symbol=' + myUrlEncode(sym) + '&BEG=' + myUrlEncode(range.beg) + '&END=' + myUrlEncode(range.end)
-}
-
 function getLastFiveDaysRange(end){
-    // Use last 5 days of available data
     var endDate = new Date(end.replace(' ', 'T') + 'Z')
-    if (isNaN(endDate.getTime())) {
-        return null
-    }
+    if (isNaN(endDate.getTime())) { return null }
     var begDate = new Date(endDate.getTime() - 5 * 24 * 60 * 60 * 1000)
     function pad(n){ return n < 10 ? '0' + n : '' + n }
     function fmtUtc(d){
         return d.getUTCFullYear() + '-' + pad(d.getUTCMonth()+1) + '-' + pad(d.getUTCDate()) + ' '
              + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds())
     }
-    return {
-        beg: fmtUtc(begDate),
-        end: fmtUtc(endDate)
-    }
+    return { beg: fmtUtc(begDate), end: fmtUtc(endDate) }
+}
+
+function buildQ1minUrl(sym, end){
+    if (!end || end === '-') { return '' }
+    var range = getLastFiveDaysRange(end)
+    if (!range) { return '' }
+    return '/cgi-bin/q1min.py?symbol=' + myUrlEncode(sym) + '&BEG=' + myUrlEncode(range.beg) + '&END=' + myUrlEncode(range.end)
 }
 
 function buildChartUrl(sym, end){
-    if (!end || end === '-') {
-        return ''
-    }
+    if (!end || end === '-') { return '' }
     var range = getLastFiveDaysRange(end)
-    if (!range) {
-        return ''
-    }
+    if (!range) { return '' }
     return '/cchart.html?symbol=' + myUrlEncode(sym) + '&BEG=' + myUrlEncode(range.beg) + '&END=' + myUrlEncode(range.end)
 }
 
@@ -89,12 +97,17 @@ function makeMainTable(symbols)
     {
         var s = symbols[i]
         var start = s.start ? s.start : '-'
-        var end = s.end ? s.end : '-'
+        var end   = s.end   ? s.end   : '-'
         var queryUrl = buildQ1minUrl(s.symbol, end)
         var chartUrl = buildChartUrl(s.symbol, end)
         var actions = '-'
         if (queryUrl && chartUrl) {
             actions = "<a href='" + queryUrl + "'>Query 1Min</a> | <a href='" + chartUrl + "'>Open Chart</a>"
+        }
+        if (s.error) {
+            start = "<span class='error-msg'>" + s.error + "</span>"
+            end = '-'
+            actions = '-'
         }
 
         strTable += "<tr onmouseover=\"this.className='yellowThing';\" onmouseout=\"this.className='whiteThing';\">"
@@ -113,12 +126,113 @@ function makeMainTable(symbols)
     strTable += "</table>"
     document.getElementById('csymbolTableDiv').innerHTML = strTable
 }
+
+/* ── Contract availability section ────────────────────────────── */
+
+function qContractAvailability()
+{
+    document.getElementById('availDiv').innerHTML = 'Loading contract availability...'
+    DoAjax('/cgi-bin/qContinuousFuturesAvailability.py', {},
+        function(data){
+            if (data && data.status === 'failed') {
+                document.getElementById('availDiv').innerHTML =
+                    "<span class='error-msg'>Failed to load availability: " + data.error + "</span>"
+                return
+            }
+            makeAvailabilitySection(Array.isArray(data) ? data : [])
+        },
+        function(jqXHR, textStatus){
+            document.getElementById('availDiv').innerHTML =
+                "<span class='error-msg'>Request failed: " + textStatus + "</span>"
+        }
+    )
+}
+
+function makeAvailabilitySection(symbols)
+{
+    if (symbols.length === 0) {
+        document.getElementById('availDiv').innerHTML = '<span class="error-msg">No data returned from Instrument API.</span>'
+        return
+    }
+
+    var html = ''
+    for (var i = 0; i < symbols.length; ++i) {
+        var s = symbols[i]
+        var contracts = s.contracts || []
+        var total = contracts.length
+        var found = 0
+        for (var j = 0; j < contracts.length; ++j) {
+            if (contracts[j].has_data) { found++ }
+        }
+
+        var headerId = 'avail-hdr-' + i
+        var bodyId   = 'avail-body-' + i
+        var badge = total > 0
+            ? (" — <span class='badge-yes'>" + found + "</span> / " + total + " contracts in TQDB")
+            : " — no rollover schedule"
+
+        html += "<div class='avail-symbol-header' id='" + headerId + "' onclick='toggleAvail(\"" + bodyId + "\")'>"
+        html += "▶ " + s.symbol + " <span style='font-weight:normal;font-size:0.9em;'>(root: " + s.symbol_root + ")</span>"
+        html += badge
+        html += "</div>"
+
+        html += "<div class='avail-contracts' id='" + bodyId + "'>"
+        if (contracts.length === 0) {
+            html += "<em>No contracts in rollover schedule.</em>"
+        } else {
+            html += "<table><tr><th>Contract Month</th><th>TQDB Symbol</th><th>Data in TQDB</th></tr>"
+            for (var j = 0; j < contracts.length; ++j) {
+                var c = contracts[j]
+                var badge2 = c.has_data
+                    ? "<span class='badge-yes'>✓ Yes</span>"
+                    : "<span class='badge-no'>✗ No</span>"
+                html += "<tr><td>" + c.contract_month + "</td><td>" + c.tqdb_symbol + "</td><td>" + badge2 + "</td></tr>"
+            }
+            html += "</table>"
+        }
+        html += "</div>"
+    }
+
+    document.getElementById('availDiv').innerHTML = html
+}
+
+function toggleAvail(bodyId)
+{
+    var el = document.getElementById(bodyId)
+    if (!el) { return }
+    var hdr = el.previousSibling
+    if (el.style.display === 'block') {
+        el.style.display = 'none'
+        if (hdr) { hdr.innerHTML = hdr.innerHTML.replace('▼', '▶') }
+    } else {
+        el.style.display = 'block'
+        if (hdr) { hdr.innerHTML = hdr.innerHTML.replace('▶', '▼') }
+    }
+}
+
+/* ── Init ──────────────────────────────────────────────────────── */
+
+window.onload = function() {
+    qContinuousInfo()
+    qContractAvailability()
+}
 </script>
-<body onload='qContinuousInfo();'>
+<body>
 <div style='margin-bottom: 10px;'>
     <a href='/esymbol.html'><button type='button'>TAIFEX</button></a>
     <a href='/csymbol.html'><button type='button'>Continuous</button></a>
 </div>
 <hr>
+
+<h3 style='margin-bottom:4px;'>Continuous Symbol Data Range</h3>
 <div id='csymbolTableDiv'>Loading...</div>
+
+<div class='avail-section'>
+    <h3 style='margin-bottom:6px;'>Contract Availability in TQDB</h3>
+    <div style='font-size:0.85em;color:#555;margin-bottom:6px;'>
+        Click a symbol row to expand its contract list. Source: Instrument API rollover schedule + Cassandra probe.
+    </div>
+    <div id='availDiv'>Loading...</div>
+</div>
+
 </body></html>

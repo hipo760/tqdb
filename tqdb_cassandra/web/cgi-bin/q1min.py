@@ -24,7 +24,6 @@ from cassandra.cluster import Cluster
 from continuous_symbols import (
     compose_continuous_minbars,
     is_continuous_symbol,
-    load_holiday_dates,
     normalize_symbol,
 )
 
@@ -155,14 +154,12 @@ def process_continuous_symbol(symbol, begin_dt, end_dt, tmp_file, gzip_enabled):
     session.default_timeout = 120
 
     try:
-        holidays = load_holiday_dates(symbol)
         bars = compose_continuous_minbars(
             session=session,
             keyspace=cassandra_keyspace,
             symbol=symbol,
             begin_dt=begin_dt_obj,
             end_dt=end_dt_obj,
-            holidays=holidays,
         )
         write_bars_to_tmp_file(bars, tmp_file, gzip_enabled)
     finally:

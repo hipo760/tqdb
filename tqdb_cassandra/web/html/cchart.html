@@ -29,12 +29,6 @@
     border-left: 2px dashed;
     opacity: 0.9;
 }
-.session-line.t {
-    border-left-color: #64b5f6;
-}
-.session-line.t1 {
-    border-left-color: #ffb74d;
-}
 .session-line.switch {
     border-left-color: #f06292;
 }
@@ -86,6 +80,13 @@ body {
     background: #1b2533;
     color: #e8edf5;
 }
+.switch-table-wrap tr.data-row:hover td {
+    background: #1c2d3e;
+    cursor: pointer;
+}
+.switch-table-wrap tr.data-row.active td {
+    background: #2a3d1c;
+}
 </style>
 <body>
 <div>
@@ -102,21 +103,25 @@ body {
     </select>
     <button id='goLatestBtn' type='button'>Go Latest</button>
     <span id='loadingState' class='loading-indicator'>Reloading chart data...</span>
+    <span style='color:#3a465b'>|</span>
+    <button id='prevSwitchBtn' type='button' disabled title='Go to previous (older) switch point'>◀ Switch</button>
+    <span id='switchNavLabel' style='display:none;font-size:12px;color:#aab4c4'></span>
+    <button id='nextSwitchBtn' type='button' disabled title='Go to next (newer) switch point'>Switch ▶</button>
 </div>
 <div class='info' id='meta'>Loading...</div>
-<div class='info' id='hoverOhlc'>Hover a bar to see OHLC (TAIFEX +8)</div>
+<div class='info' id='hoverOhlc'>Hover a bar to see OHLC (UTC)</div>
 <div id='chartWrap'>
     <div id='chart' class='chart-layer'></div>
     <div id='sessionOverlay' class='session-overlay'></div>
 </div>
 <div class='switch-table-wrap'>
-    <div class='info' id='switchPointTitle'>Contract Switch Points (+8)</div>
+    <div class='info' id='switchPointTitle'>Contract Switch Points (UTC)</div>
     <div id='switchPointTable'>Loading switch points...</div>
 </div>
 <div class='info err' id='err'></div>
 
 <script language='javascript'>
-var TAIFEX_OFFSET_SEC = 8 * 3600
+var TAIFEX_OFFSET_SEC = 0
 var MAX_BARS = 300
 var MAX_EXPAND_ATTEMPTS = 4
 var LOOKBACK_FACTOR = 1.4
@@ -133,6 +138,8 @@ var visibleRangeSubscribed = false
 var LAZY_LEFT_EDGE_THRESHOLD = 20
 var LAZY_RIGHT_GAP_THRESHOLD = 20
 var currentSwitchPoints = []
+var allSwitchPoints = []    // epoch seconds, sorted oldest-first, for nav
+var currentSwitchIdx = -1
 var currentMetaText = ''
 
 function formatPrice(v) {
@@ -152,7 +159,7 @@ function setHoverOhlcText(text) {
 }
 
 function clearHoverOhlc() {
-    setHoverOhlcText('Hover a bar to see OHLC (TAIFEX +8)')
+    setHoverOhlcText('Hover a bar to see OHLC (UTC)')
 }
 
 function extractCandleFromCrosshairParam(param) {
@@ -306,17 +313,7 @@ function renderSessionLines() {
     }
     overlay.innerHTML = ''
 
-    var first = currentCandles[0].time
-    var last = currentCandles[currentCandles.length - 1].time
-    var cfg = getSessionConfig(currentSymbol)
-    var firstYmd = getLocalYmd(first, cfg.tzName)
-    var lastYmd = getLocalYmd(last, cfg.tzName)
-    var startSerial = ymdToSerial(firstYmd.y, firstYmd.m, firstYmd.d) - 1
-    var endSerial = ymdToSerial(lastYmd.y, lastYmd.m, lastYmd.d) + 1
-
     function mapBoundaryToVisibleBarTime(utcEpochSec) {
-        // timeToCoordinate may return null for timestamps not present on the time scale.
-        // Map to the first bar at/after the boundary so lines also work for aggregated frames.
         for (var i = 0; i < currentCandles.length; i++) {
             if (currentCandles[i].time >= utcEpochSec) {
                 return currentCandles[i].time
@@ -330,7 +327,6 @@ function renderSessionLines() {
         if (mappedTime === null) {
             return
         }
-
         var x = currentChart.timeScale().timeToCoordinate(mappedTime)
         if (x === null || x === undefined) {
             return
@@ -345,16 +341,8 @@ function renderSessionLines() {
         overlay.appendChild(line)
     }
 
-    if (currentResolutionMin <= 30) {
-        for (var serial = startSerial; serial <= endSerial; serial++) {
-            var ymd = serialToYmd(serial)
-            addBoundaryLine(localYmdToUtcEpochSec(ymd.y, ymd.m, ymd.d, cfg.tHour, cfg.tMin, cfg.tzName), 't')
-            addBoundaryLine(localYmdToUtcEpochSec(ymd.y, ymd.m, ymd.d, cfg.t1Hour, cfg.t1Min, cfg.tzName), 't1')
-        }
-    } else if (currentResolutionMin === 1440) {
-        for (var i = 0; i < currentSwitchPoints.length; i++) {
-            addBoundaryLine(currentSwitchPoints[i], 'switch')
-        }
+    for (var i = 0; i < currentSwitchPoints.length; i++) {
+        addBoundaryLine(currentSwitchPoints[i], 'switch')
     }
 }
 
@@ -406,7 +394,7 @@ function pad2(n) {
     return n < 10 ? '0' + n : '' + n
 }
 
-function formatUtcPlus8(epochSec, withSeconds) {
+function formatUtc(epochSec, withSeconds) {
     var d = new Date((epochSec + TAIFEX_OFFSET_SEC) * 1000)
     var y = d.getUTCFullYear()
     var m = pad2(d.getUTCMonth() + 1)
@@ -557,8 +545,11 @@ function fetchSwitchPoints(symbol, begUtc, endUtc) {
                         before_symbol: p.before_symbol || '-',
                         after_symbol: p.after_symbol || '-',
                         before_close: p.before_close,
-                        after_open: p.after_open,
-                        gap: p.gap
+                        before_close_utc: p.before_close_utc,
+                        after_close: p.after_close,
+                        after_close_utc: p.after_close_utc,
+                        diff: p.diff,
+                        lookback_utc: p.lookback_utc
                     })
                 }
             }
@@ -578,23 +569,106 @@ function renderSwitchPointTable(symbol, switchPoints) {
         return
     }
 
+    // Pre-compute cumulative backward adjustment (newest switch = row 0 = reference 0).
+    // switchPoints is sorted newest-first; cumAdj[i] = sum of diff[0..i].
+    var cumAdj = []
+    var runningSum = 0
+    var broken = false
+    for (var i = 0; i < switchPoints.length; i++) {
+        var d = switchPoints[i].diff
+        if (d === null || d === undefined || broken) {
+            broken = true
+            cumAdj.push(null)
+        } else {
+            runningSum += d
+            cumAdj.push(runningSum)
+        }
+    }
+
     var html = "<table>"
-    html += "<tr><th>#</th><th>Continuous Symbol</th><th>Before</th><th>After</th><th>Switch DateTime (+8)</th><th>Before Close</th><th>After Open</th><th>Gap</th></tr>"
+    html += "<tr><th>#</th><th>Continuous Symbol</th><th>Before</th><th>After</th><th>Switch DateTime (UTC)</th><th>Lookback (UTC-30m)</th><th>Before Close</th><th>After Close</th><th>Diff</th><th>Cumulative Adj</th></tr>"
+    var totalRows = switchPoints.length
     for (var i = 0; i < switchPoints.length; i++) {
         var row = switchPoints[i]
-        html += "<tr>"
+        var navIdx = totalRows - 1 - i
+        html += "<tr class='data-row' onclick='navigateToSwitch(" + navIdx + ")' title='Click to center chart on this switch point'>"
         html += "<td>" + (i + 1) + "</td>"
         html += "<td>" + symbol + "</td>"
         html += "<td>" + row.before_symbol + "</td>"
         html += "<td>" + row.after_symbol + "</td>"
-        html += "<td>" + formatUtcPlus8(row.switch_epoch, true) + "</td>"
+        html += "<td>" + (row.switch_utc || '-') + "</td>"
+        html += "<td>" + (row.lookback_utc || '-') + "</td>"
         html += "<td>" + formatPrice(row.before_close) + "</td>"
-        html += "<td>" + formatPrice(row.after_open) + "</td>"
-        html += "<td>" + formatPrice(row.gap) + "</td>"
+        html += "<td>" + formatPrice(row.after_close) + "</td>"
+        html += "<td>" + formatPrice(row.diff) + "</td>"
+        html += "<td>" + formatPrice(cumAdj[i]) + "</td>"
         html += "</tr>"
     }
     html += "</table>"
+    // Update nav: allSwitchPoints sorted oldest-first
+    allSwitchPoints = switchPoints.slice().reverse().map(function(p) { return p.switch_epoch })
+    currentSwitchIdx = -1
+    updateSwitchNavButtons()
     holder.innerHTML = html
+}
+
+function updateSwitchNavButtons() {
+    var prevBtn = document.getElementById('prevSwitchBtn')
+    var nextBtn = document.getElementById('nextSwitchBtn')
+    var label = document.getElementById('switchNavLabel')
+    if (!prevBtn || !nextBtn || !label) { return }
+    if (!allSwitchPoints.length) {
+        prevBtn.disabled = true
+        nextBtn.disabled = true
+        label.style.display = 'none'
+        return
+    }
+    label.style.display = 'inline'
+    if (currentSwitchIdx < 0) {
+        label.innerText = '-/' + allSwitchPoints.length
+    } else {
+        label.innerText = (currentSwitchIdx + 1) + '/' + allSwitchPoints.length
+    }
+    prevBtn.disabled = currentSwitchIdx <= 0
+    nextBtn.disabled = currentSwitchIdx >= allSwitchPoints.length - 1
+}
+
+function highlightSwitchTableRow(idx) {
+    var tableIdx = allSwitchPoints.length - 1 - idx
+    var rows = document.querySelectorAll('#switchPointTable table tr.data-row')
+    for (var i = 0; i < rows.length; i++) {
+        rows[i].classList.remove('active')
+    }
+    if (rows[tableIdx]) {
+        rows[tableIdx].classList.add('active')
+        rows[tableIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+}
+
+function navigateToSwitch(idx) {
+    if (!allSwitchPoints.length || idx < 0 || idx >= allSwitchPoints.length) { return }
+    currentSwitchIdx = idx
+    updateSwitchNavButtons()
+    highlightSwitchTableRow(idx)
+
+    var epochSec = allSwitchPoints[idx]
+    // Half-window: at least 5 days, or 20 bars worth at current resolution
+    var halfWindowSec = Math.max(currentResolutionMin * 60 * 20, 86400 * 5)
+    // Set currentEndSec so the switch point sits in the middle of the loaded window
+    currentEndSec = epochSec + halfWindowSec
+
+    loadAndRenderWindow(false)
+        .then(function() {
+            if (currentChart) {
+                currentChart.timeScale().setVisibleRange({
+                    from: epochSec - halfWindowSec,
+                    to: epochSec + halfWindowSec
+                })
+            }
+        })
+        .catch(function(err) {
+            document.getElementById('err').innerText = 'Navigate failed: ' + err.message
+        })
 }
 
 function fetchContinuousBounds(symbol) {
@@ -621,6 +695,9 @@ function loadAllSwitchPointsTable(symbol) {
     if (holder) {
         holder.innerHTML = 'Loading switch points...'
     }
+    allSwitchPoints = []
+    currentSwitchIdx = -1
+    updateSwitchNavButtons()
 
     return fetchContinuousBounds(symbol)
         .then(function(bounds) {
@@ -694,7 +771,7 @@ function renderChart(symbol, rangeBegUtc, rangeEndUtc, candles, resolutionMin, f
             timeVisible: true,
             secondsVisible: false,
             tickMarkFormatter: function(time) {
-                return formatUtcPlus8(Number(time), false)
+                return formatUtc(Number(time), false)
             }
         },
         grid: {
@@ -706,7 +783,7 @@ function renderChart(symbol, rangeBegUtc, rangeEndUtc, candles, resolutionMin, f
         },
         localization: {
             timeFormatter: function(time) {
-                return formatUtcPlus8(Number(time), true)
+                return formatUtc(Number(time), true)
             }
         }
     })
@@ -741,7 +818,7 @@ function renderChart(symbol, rangeBegUtc, rangeEndUtc, candles, resolutionMin, f
 
     updateMeta(
         'Symbol: ' + symbol + ' | Resolution: ' + resolutionLabel(resolutionMin) + ' | Query Range(UTC): ' + rangeBegUtc + ' ~ ' + rangeEndUtc +
-        ' | Display TZ: UTC+8 (TAIFEX) | Bars: ' + candles.length + ' (max 300)'
+        ' | Display TZ: UTC | Bars: ' + candles.length + ' (max 300)'
     )
     clearHoverOhlc()
 
@@ -805,7 +882,7 @@ function renderChart(symbol, rangeBegUtc, rangeEndUtc, candles, resolutionMin, f
             }
 
             setHoverOhlcText(
-                'Hover OHLC | Time(+8): ' + formatUtcPlus8(timeSec, true) +
+                'Hover OHLC | Time(UTC): ' + formatUtc(timeSec, true) +
                 ' | O: ' + formatPrice(candle.open) +
                 ' H: ' + formatPrice(candle.high) +
                 ' L: ' + formatPrice(candle.low) +
@@ -951,6 +1028,12 @@ function main() {
 
     document.getElementById('resolution').addEventListener('change', rerenderForResolution)
     document.getElementById('goLatestBtn').addEventListener('click', goLatestWindow)
+    document.getElementById('prevSwitchBtn').addEventListener('click', function() {
+        navigateToSwitch(currentSwitchIdx <= 0 ? 0 : currentSwitchIdx - 1)
+    })
+    document.getElementById('nextSwitchBtn').addEventListener('click', function() {
+        navigateToSwitch(currentSwitchIdx < 0 ? 0 : currentSwitchIdx + 1)
+    })
     loadAllSwitchPointsTable(symbol)
     rerenderForResolution()
 }
