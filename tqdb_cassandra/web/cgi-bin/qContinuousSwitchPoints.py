@@ -12,14 +12,18 @@ Query params:
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.parse import unquote
 
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster
 
 from continuous_symbols import (
+    _rollover_close_to_utc,
+    _rollover_entry_to_utc,
     discover_contract_switch_points,
+    fetch_continuous_futures,
+    fetch_contract_rollover_dt,
     is_continuous_symbol,
     normalize_symbol,
 )
@@ -59,14 +63,13 @@ def _to_json_number(v):
         return None
 
 
-def enrich_switch_points_with_gap(session, keyspace, points):
-    """Enrich switch points with close-to-close diff at (switch_utc - 30 min).
+def enrich_switch_points_with_gap(session, keyspace, points, close_dt_by_switch):
+    """Enrich switch points with close-to-close diff at the market close time on rollover day.
 
-    Both before_close and after_close are taken from the last available bar
-    at or before (switch_utc - 30 minutes), matching the price adjustment
-    definition used for continuous bar composition.
+    close_dt_by_switch maps switch_utc string -> UTC datetime of market close derived
+    from the continuous_futures close_time + timezone fields, matching the price
+    adjustment reference used in compose_continuous_minbars.
     """
-    _LOOKBACK_MIN = 30
     now_utc = datetime.utcnow()
     q_close = (
         f"SELECT datetime, close FROM {{keyspace}}.minbar "
@@ -74,13 +77,11 @@ def enrich_switch_points_with_gap(session, keyspace, points):
     )
 
     for row in points:
-        switch_dt = parse_utc_text(row["switch_utc"])
-        lookback = switch_dt - timedelta(minutes=_LOOKBACK_MIN)
-        row["lookback_utc"] = lookback.strftime("%Y-%m-%d %H:%M:%S")
+        close_dt = close_dt_by_switch.get(row["switch_utc"])
+        row["close_utc"] = close_dt.strftime("%Y-%m-%d %H:%M:%S") if close_dt else None
 
-        # Future switch point — rollover hasn't happened yet; prices at lookback
-        # are just today's market prices, not the actual rollover diff.
-        if switch_dt > now_utc:
+        # Close time unknown or market hasn't closed yet — no price data.
+        if close_dt is None or close_dt > now_utc:
             row["before_close"] = None
             row["before_close_utc"] = None
             row["after_close"] = None
@@ -92,8 +93,8 @@ def enrich_switch_points_with_gap(session, keyspace, points):
         after_symbol = row["after_symbol"]
 
         q = q_close.format(keyspace=keyspace)
-        before_row = session.execute(q, [before_symbol, lookback], timeout=60).one()
-        after_row = session.execute(q, [after_symbol, lookback], timeout=60).one()
+        before_row = session.execute(q, [before_symbol, close_dt], timeout=60).one()
+        after_row = session.execute(q, [after_symbol, close_dt], timeout=60).one()
 
         before_close = before_row.close if before_row else None
         after_close = after_row.close if after_row else None
@@ -147,7 +148,32 @@ def main():
 
         points = discover_contract_switch_points(symbol, begin_dt, end_dt)
         points.sort(key=lambda item: item["switch_utc"], reverse=True)
-        enrich_switch_points_with_gap(session, cassandra_keyspace, points)
+
+        # Build close_dt_by_switch: map switch_utc string -> close_dt in UTC.
+        # Mirrors compose_continuous_minbars: for each rollover entry compute
+        # switch_utc (rollover_date + rollover_time + integer tz offset) and
+        # close_dt (rollover_date + close_time + IANA tz), then key by switch_utc string.
+        cf_rows = fetch_continuous_futures(symbol=symbol)
+        close_time_str = cf_rows[0].get("close_time", "") if cf_rows else ""
+        close_timezone = cf_rows[0].get("timezone", "") if cf_rows else ""
+        rollover_entries = fetch_contract_rollover_dt(symbol=symbol)
+        close_dt_by_switch: dict[str, object] = {}
+        for _row in rollover_entries:
+            switch_utc_dt = _rollover_entry_to_utc(
+                _row.get("rollover_date"),
+                _row.get("rollover_time", "00:00"),
+                int(_row.get("timezone", 0)),
+            )
+            if switch_utc_dt is None:
+                continue
+            switch_key = switch_utc_dt.strftime("%Y-%m-%d %H:%M:%S")
+            close_dt_by_switch[switch_key] = _rollover_close_to_utc(
+                str(_row.get("rollover_date", "")),
+                close_time_str,
+                close_timezone,
+            )
+
+        enrich_switch_points_with_gap(session, cassandra_keyspace, points, close_dt_by_switch)
 
         send_json({
             "symbol": symbol,

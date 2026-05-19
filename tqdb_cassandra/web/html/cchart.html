@@ -549,7 +549,7 @@ function fetchSwitchPoints(symbol, begUtc, endUtc) {
                         after_close: p.after_close,
                         after_close_utc: p.after_close_utc,
                         diff: p.diff,
-                        lookback_utc: p.lookback_utc
+                        close_utc: p.close_utc
                     })
                 }
             }
@@ -586,7 +586,7 @@ function renderSwitchPointTable(symbol, switchPoints) {
     }
 
     var html = "<table>"
-    html += "<tr><th>#</th><th>Continuous Symbol</th><th>Before</th><th>After</th><th>Switch DateTime (UTC)</th><th>Lookback (UTC-30m)</th><th>Before Close</th><th>After Close</th><th>Diff</th><th>Cumulative Adj</th></tr>"
+    html += "<tr><th>#</th><th>Continuous Symbol</th><th>Before</th><th>After</th><th>Switch DateTime (UTC)</th><th>Close Time (UTC)</th><th>Before Close</th><th>After Close</th><th>Diff</th><th>Cumulative Adj</th></tr>"
     var totalRows = switchPoints.length
     for (var i = 0; i < switchPoints.length; i++) {
         var row = switchPoints[i]
@@ -597,7 +597,7 @@ function renderSwitchPointTable(symbol, switchPoints) {
         html += "<td>" + row.before_symbol + "</td>"
         html += "<td>" + row.after_symbol + "</td>"
         html += "<td>" + (row.switch_utc || '-') + "</td>"
-        html += "<td>" + (row.lookback_utc || '-') + "</td>"
+        html += "<td>" + (row.close_utc || '-') + "</td>"
         html += "<td>" + formatPrice(row.before_close) + "</td>"
         html += "<td>" + formatPrice(row.after_close) + "</td>"
         html += "<td>" + formatPrice(row.diff) + "</td>"
