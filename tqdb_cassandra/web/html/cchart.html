@@ -122,6 +122,7 @@ body {
 
 <script language='javascript'>
 var TAIFEX_OFFSET_SEC = 0
+var currentTzName = 'UTC'
 var MAX_BARS = 300
 var MAX_EXPAND_ATTEMPTS = 4
 var LOOKBACK_FACTOR = 1.4
@@ -159,7 +160,7 @@ function setHoverOhlcText(text) {
 }
 
 function clearHoverOhlc() {
-    setHoverOhlcText('Hover a bar to see OHLC (UTC)')
+    setHoverOhlcText('Hover a bar to see OHLC (' + currentTzName + ')')
 }
 
 function extractCandleFromCrosshairParam(param) {
@@ -395,17 +396,12 @@ function pad2(n) {
 }
 
 function formatUtc(epochSec, withSeconds) {
-    var d = new Date((epochSec + TAIFEX_OFFSET_SEC) * 1000)
-    var y = d.getUTCFullYear()
-    var m = pad2(d.getUTCMonth() + 1)
-    var day = pad2(d.getUTCDate())
-    var hh = pad2(d.getUTCHours())
-    var mm = pad2(d.getUTCMinutes())
+    var p = getLocalParts(epochSec, currentTzName)
+    var result = p.y + '-' + pad2(p.m) + '-' + pad2(p.d) + ' ' + pad2(p.hh) + ':' + pad2(p.mm)
     if (withSeconds) {
-        var ss = pad2(d.getUTCSeconds())
-        return y + '-' + m + '-' + day + ' ' + hh + ':' + mm + ':' + ss
+        result += ':' + pad2(p.ss)
     }
-    return y + '-' + m + '-' + day + ' ' + hh + ':' + mm
+    return result
 }
 
 function parseCsvToCandles(csvText) {
@@ -683,6 +679,9 @@ function fetchContinuousBounds(symbol) {
             var rows = (obj && obj.symbols) ? obj.symbols : []
             for (var i = 0; i < rows.length; i++) {
                 if ((rows[i].symbol || '').toUpperCase() === symbol.toUpperCase()) {
+                    if (rows[i].timezone) {
+                        currentTzName = rows[i].timezone
+                    }
                     return rows[i]
                 }
             }
@@ -818,7 +817,7 @@ function renderChart(symbol, rangeBegUtc, rangeEndUtc, candles, resolutionMin, f
 
     updateMeta(
         'Symbol: ' + symbol + ' | Resolution: ' + resolutionLabel(resolutionMin) + ' | Query Range(UTC): ' + rangeBegUtc + ' ~ ' + rangeEndUtc +
-        ' | Display TZ: UTC | Bars: ' + candles.length + ' (max 300)'
+        ' | Display TZ: ' + currentTzName + ' | Bars: ' + candles.length + ' (max 300)'
     )
     clearHoverOhlc()
 
@@ -882,7 +881,7 @@ function renderChart(symbol, rangeBegUtc, rangeEndUtc, candles, resolutionMin, f
             }
 
             setHoverOhlcText(
-                'Hover OHLC | Time(UTC): ' + formatUtc(timeSec, true) +
+                'Hover OHLC | Time(' + currentTzName + '): ' + formatUtc(timeSec, true) +
                 ' | O: ' + formatPrice(candle.open) +
                 ' H: ' + formatPrice(candle.high) +
                 ' L: ' + formatPrice(candle.low) +

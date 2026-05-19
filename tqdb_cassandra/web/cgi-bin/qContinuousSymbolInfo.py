@@ -55,15 +55,18 @@ def main():
             symbols_to_query = [row["symbol"] for row in cf_rows] if cf_rows else [
                 "TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT", "HSIDT"
             ]
+            tz_by_symbol = {row["symbol"].upper(): row.get("timezone", "UTC") for row in cf_rows} if cf_rows else {}
         except Exception:
             symbols_to_query = [
                 "TXON", "TXDT", "NQON", "NQDT", "ESON", "ESDT", "YMON", "YMDT", "HSIDT"
             ]
+            tz_by_symbol = {}
 
         rows = []
         for symbol in symbols_to_query:
             try:
                 bounds = discover_continuous_bounds(session, cassandra_keyspace, symbol)
+                bounds["timezone"] = tz_by_symbol.get(symbol.upper(), "UTC")
                 rows.append(bounds)
             except Exception as exc:
                 error_msg = f"Failed to discover bounds for {symbol}: {exc}"
