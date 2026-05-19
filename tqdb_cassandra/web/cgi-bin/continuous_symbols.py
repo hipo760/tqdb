@@ -11,14 +11,13 @@ Configure via environment variables (set in docker-compose.yml):
 
 Price adjustment:
   Close-to-close, cumulative backward adjustment.
-  For each switch point the lookback reference is (switch_utc - 30 min).
-  diff = close(new_contract, lookback) - close(old_contract, lookback)
+  For each switch point the lookback reference is the market close time on
+  rollover_date, derived from the close_time (HHmm) and timezone (IANA name)
+  fields on the continuous_futures API row.
+  diff = close(new_contract, close_dt) - close(old_contract, close_dt)
   Older segments are cumulatively shifted by the sum of downstream diffs.
   If either close price is unavailable the diff for that pair is treated as 0.
-
-DT-session filtering:
-  DT symbols (TXDT, NQDT, ESDT, YMDT, HSIDT) only include bars within the
-  exchange day-session window. ON symbols include all bars.
+  A diff is only computed once now_utc >= close_dt (market has closed).
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 
 # ---------------------------------------------------------------------------
@@ -47,9 +47,6 @@ FUTURES_MONTH_CODES = "FGHJKMNQUVXZ"
 TAIFEX_ROOTS: frozenset[str] = frozenset({"TX", "TXF"})
 
 UTC_TZ = timezone.utc
-
-# Minutes before switch_utc to look up close prices for price adjustment
-_PRICE_ADJUST_LOOKBACK_MIN = 30
 
 _FAR_FUTURE = datetime(9999, 12, 31, 23, 59, 59)
 
@@ -291,33 +288,58 @@ def _cassandra_symbol_has_data(session, keyspace: str, symbol: str) -> bool:
 # Price adjustment
 # ---------------------------------------------------------------------------
 
+def _rollover_close_to_utc(
+    rollover_date: str,
+    close_time: str,
+    timezone_name: str,
+) -> datetime | None:
+    """Return the market close datetime in UTC for a rollover_date + close_time.
+
+    Args:
+        rollover_date:  Date string in YYYY-MM-DD format.
+        close_time:     Time string in HHmm format, e.g. "1345" or "0500".
+        timezone_name:  IANA timezone name, e.g. "Asia/Taipei".
+    """
+    try:
+        hh = int(close_time[:2])
+        mm = int(close_time[2:4])
+        date_obj = datetime.strptime(rollover_date, "%Y-%m-%d")
+        tz = ZoneInfo(timezone_name)
+        local_dt = date_obj.replace(hour=hh, minute=mm, tzinfo=tz)
+        return local_dt.astimezone(UTC_TZ).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
 def _compute_switch_diffs(
     session,
     keyspace: str,
     raw_segments: list[tuple[datetime, datetime, str]],
+    close_datetimes_utc: list[datetime | None],
 ) -> list[float | None]:
-    """Compute close-to-close diff at the lookback point for each consecutive segment pair.
+    """Compute close-to-close diff at the market close point for each consecutive segment pair.
 
-    lookback_utc = switch_utc - _PRICE_ADJUST_LOOKBACK_MIN minutes
-    diff[i] = close(segment[i+1].symbol, lookback) - close(segment[i].symbol, lookback)
+    close_datetimes_utc[i] is the UTC datetime of market close on the rollover_date
+    for segment i, derived from the continuous_futures close_time + timezone fields.
 
-    Returns None for a pair when either close price is unavailable (treated as 0
-    in the cumulative offset computation).
+    diff[i] = close(segment[i+1].symbol, close_dt) - close(segment[i].symbol, close_dt)
+
+    A diff is only computed once now_utc >= close_dt (market has closed on rollover day).
+    Returns None for a pair when close_dt is unknown or the market hasn't closed yet,
+    or when either close price is unavailable. None is treated as 0 in the cumulative
+    offset computation.
     """
     diffs: list[float | None] = [None] * len(raw_segments)
     now_utc = datetime.utcnow()
     for i in range(len(raw_segments) - 1):
-        # switch_utc is the start of the next segment
-        switch_utc = raw_segments[i + 1][0]
-        # Skip future switch points — the rollover hasn't happened yet so any
-        # "close" we'd find is just today's price, not the actual rollover diff.
-        if switch_utc > now_utc:
+        close_dt = close_datetimes_utc[i + 1]
+        # Skip if close time is unknown or the market hasn't closed yet.
+        if close_dt is None or close_dt > now_utc:
             continue
-        lookback = switch_utc - timedelta(minutes=_PRICE_ADJUST_LOOKBACK_MIN)
         before_sym = raw_segments[i][2]
         after_sym = raw_segments[i + 1][2]
-        before_close = _query_last_close_at_or_before(session, keyspace, before_sym, lookback)
-        after_close = _query_last_close_at_or_before(session, keyspace, after_sym, lookback)
+        before_close = _query_last_close_at_or_before(session, keyspace, before_sym, close_dt)
+        after_close = _query_last_close_at_or_before(session, keyspace, after_sym, close_dt)
         if before_close is not None and after_close is not None:
             diffs[i] = after_close - before_close
     return diffs
@@ -361,17 +383,18 @@ def compose_continuous_minbars(
     3. Build all raw segments from the full schedule.
     4. Compute per-pair diffs (close-to-close at switch_utc - 30 min) and
        cumulative backward offsets for ALL segments.
-    5. Query Cassandra bars for segments overlapping [begin_dt, end_dt],
-       apply DT-session filtering, apply price offsets.
+    5. Query Cassandra bars for segments overlapping [begin_dt, end_dt] and apply price offsets.
     6. Return sorted, deduplicated bar list.
     """
     sym = normalize_symbol(symbol)
 
-    # 1. Resolve symbol_root from API
+    # 1. Resolve symbol_root + close_time metadata from API
     cf_rows = fetch_continuous_futures(symbol=sym)
     if not cf_rows:
         return []
     symbol_root = cf_rows[0]["symbol_root"]
+    close_time_str: str = cf_rows[0].get("close_time", "")
+    close_timezone: str = cf_rows[0].get("timezone", "")
 
     # 2. Fetch rollover schedule
     rollover_entries = fetch_contract_rollover_dt(symbol=sym)
@@ -384,8 +407,27 @@ def compose_continuous_minbars(
     # 3. Build all raw segments (unclipped; needed for complete offset calculation)
     raw_segments = _schedule_to_raw_segments(schedule)
 
-    # 4. Compute diffs and cumulative offsets across ALL segments
-    diffs = _compute_switch_diffs(session, keyspace, raw_segments)
+    # 4a. Build close_datetimes_utc aligned 1:1 with raw_segments.
+    #     Mirrors the filtering and sort order of _build_rollover_schedule so that
+    #     close_datetimes_utc[i] corresponds to raw_segments[i].
+    _sorted_dates: list[tuple[datetime, str]] = []
+    for _row in rollover_entries:
+        _utc = _rollover_entry_to_utc(
+            _row.get("rollover_date"),
+            _row.get("rollover_time", "00:00"),
+            int(_row.get("timezone", 0)),
+        )
+        if _utc is None:
+            continue
+        _sorted_dates.append((_utc, str(_row.get("rollover_date", ""))))
+    _sorted_dates.sort(key=lambda x: x[0])
+    close_datetimes_utc: list[datetime | None] = [
+        _rollover_close_to_utc(rd, close_time_str, close_timezone)
+        for _, rd in _sorted_dates
+    ]
+
+    # 4b. Compute diffs and cumulative offsets across ALL segments
+    diffs = _compute_switch_diffs(session, keyspace, raw_segments, close_datetimes_utc)
     offsets = _cumulative_offsets(diffs)
 
     # 5. Query bars for segments overlapping [begin_dt, end_dt] and apply offsets
