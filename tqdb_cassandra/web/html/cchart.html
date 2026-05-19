@@ -378,6 +378,13 @@ function parseUtcTextToEpochSec(utcText) {
     return Math.floor(d.getTime() / 1000)
 }
 
+function convertUtcStringToCurrentTz(utcStr) {
+    if (!utcStr || utcStr === '-') { return utcStr }
+    var sec = parseUtcTextToEpochSec(utcStr)
+    if (!sec) { return utcStr }
+    return formatUtc(sec, true) + ' (' + currentTzName + ')'
+}
+
 function formatUtcTextFromEpochSec(epochSec) {
     var d = new Date(epochSec * 1000)
     return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + ' ' +
@@ -582,7 +589,7 @@ function renderSwitchPointTable(symbol, switchPoints) {
     }
 
     var html = "<table>"
-    html += "<tr><th>#</th><th>Continuous Symbol</th><th>Before</th><th>After</th><th>Switch DateTime (UTC)</th><th>Close Time (UTC)</th><th>Before Close</th><th>After Close</th><th>Diff</th><th>Cumulative Adj</th></tr>"
+    html += "<tr><th>#</th><th>Continuous Symbol</th><th>Before</th><th>After</th><th>Switch DateTime</th><th>Close Time</th><th>Before Close</th><th>After Close</th><th>Diff</th><th>Cumulative Adj</th></tr>"
     var totalRows = switchPoints.length
     for (var i = 0; i < switchPoints.length; i++) {
         var row = switchPoints[i]
@@ -592,8 +599,8 @@ function renderSwitchPointTable(symbol, switchPoints) {
         html += "<td>" + symbol + "</td>"
         html += "<td>" + row.before_symbol + "</td>"
         html += "<td>" + row.after_symbol + "</td>"
-        html += "<td>" + (row.switch_utc || '-') + "</td>"
-        html += "<td>" + (row.close_utc || '-') + "</td>"
+        html += "<td>" + convertUtcStringToCurrentTz(row.switch_utc || '-') + "</td>"
+        html += "<td>" + convertUtcStringToCurrentTz(row.close_utc || '-') + "</td>"
         html += "<td>" + formatPrice(row.before_close) + "</td>"
         html += "<td>" + formatPrice(row.after_close) + "</td>"
         html += "<td>" + formatPrice(row.diff) + "</td>"
@@ -605,6 +612,10 @@ function renderSwitchPointTable(symbol, switchPoints) {
     allSwitchPoints = switchPoints.slice().reverse().map(function(p) { return p.switch_epoch })
     currentSwitchIdx = -1
     updateSwitchNavButtons()
+    var titleEl = document.getElementById('switchPointTitle')
+    if (titleEl) {
+        titleEl.innerText = 'Contract Switch Points (' + currentTzName + ')'
+    }
     holder.innerHTML = html
 }
 
