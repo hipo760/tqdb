@@ -2,12 +2,11 @@
 
 TQDB is a financial market data storage and query system. It ingests, stores, and serves tick, second-bar, minute-bar, and daily-bar data for equities, futures, and crypto instruments.
 
-The repository contains two independent backend implementations and a crypto data collector:
+The repository contains two independent components:
 
 | Folder | Description |
 |--------|-------------|
 | [`tqdb_cassandra/`](#tqdb_cassandra) | **Production** — Apache Cassandra + Apache CGI API |
-| [`tqdb_questdb/`](#tqdb_questdb) | **Next-gen** — QuestDB + FastAPI (migration in progress) |
 | [`crypto/`](#crypto) | Bybit kline backfill service |
 
 ---
@@ -48,18 +47,6 @@ See [`tqdb_cassandra/README.md`](tqdb_cassandra/README.md) for full documentatio
 
 ---
 
-## tqdb_questdb
-
-A modernised replacement for the Cassandra stack, currently under development.
-
-- **Database**: [QuestDB](https://questdb.io/) (high-performance time-series)
-- **API**: FastAPI with OpenAPI docs; **100% backward-compatible** CGI endpoints
-- **Performance**: 10–100× faster queries than the Cassandra implementation
-
-See [`tqdb_questdb/README.md`](tqdb_questdb/README.md) and [`tqdb_questdb/docs/MIGRATION_PLAN.md`](tqdb_questdb/docs/MIGRATION_PLAN.md) for the migration guide.
-
----
-
 ## crypto
 
 Bybit cryptocurrency kline backfill service. Keeps the `tqdb1.minbar` Cassandra table up-to-date with Bybit 1-minute OHLCV data.
@@ -90,11 +77,6 @@ tqdb/
 │   ├── web/                #   CGI web API container
 │   ├── tools/              #   Data migration CLI
 │   └── archive/            #   Legacy bare-metal install guides
-│
-├── tqdb_questdb/           # QuestDB-based backend (next-gen)
-│   ├── questdb/            #   Database container & schema
-│   ├── web/                #   FastAPI web container (WIP)
-│   └── docs/               #   Migration plan & API reference
 │
 ├── crypto/                 # Crypto data collector
 │   └── bybit/              #   Bybit kline backfill service

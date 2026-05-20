@@ -1,9 +1,8 @@
 # Project Guidelines
 
 ## Scope
-This repository has three independent components:
+This repository has two independent components:
 - `tqdb_cassandra/`: production stack (Cassandra + Apache CGI API)
-- `tqdb_questdb/`: next-gen stack (QuestDB + FastAPI, migration in progress)
 - `crypto/bybit/`: Bybit kline backfill service writing to Cassandra
 
 When implementing changes, keep work scoped to the relevant component and avoid cross-component assumptions.
@@ -19,8 +18,6 @@ Use component-local commands and run from the component directory.
   - `cd tqdb_cassandra/tools && uv run transfer_minbar.py --help`
 - Crypto backfill service:
   - `cd crypto/bybit && docker compose build && docker compose up -d`
-- QuestDB stack:
-  - `cd tqdb_questdb/web && docker-compose up -d`
 
 If tests exist for a touched area, run the smallest relevant test scope first before broad runs.
 
@@ -48,7 +45,3 @@ Use these docs as source of truth; link to them in discussions/PR notes instead 
 - `tqdb_cassandra/tools/YEAR_PARTITION_FEATURE.md`
 - `tqdb_cassandra/archive/BUG_FIX_SYMBOL_LIST.md`
 - `crypto/bybit/backfill/README.md`
-- `tqdb_questdb/README.md`
-- `tqdb_questdb/docs/QUICKSTART.md`
-- `tqdb_questdb/docs/LEGACY_API_REFERENCE.md`
-- `tqdb_questdb/docs/MIGRATION_PLAN.md`

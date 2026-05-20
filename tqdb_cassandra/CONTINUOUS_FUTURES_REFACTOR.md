@@ -4,7 +4,7 @@
 
 Replace local holiday/calendar schedule logic with an external Instrument API dependency that pre-computes rollover switch points. Simplify the continuous bar composition pipeline and make the price adjustment definition explicit.
 
-**Scope**: `tqdb_cassandra` only. `tqdb_questdb` is not in scope.
+**Scope**: `tqdb_cassandra` only.
 
 ---
 
